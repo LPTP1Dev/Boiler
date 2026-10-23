@@ -97,7 +97,7 @@ authInternalUsers:
 # }
 # If the response code is 20x, authentication is accepted, otherwise
 # it is discarded.
-authHTTPAddress: http://localhost:7000/auth
+authHTTPAddress: http://127.0.0.1:7000/auth
 # Actions to exclude from HTTP-based authentication.
 # Format is the same as the one of user permissions.
 authHTTPExclude:
@@ -131,7 +131,7 @@ authJWTClaimKey: mediamtx_permissions
 # Enable controlling the server through the Control API.
 api: yes
 # Address of the Control API listener.
-apiAddress: :9997
+apiAddress: 127.0.0.1:9997
 # Enable TLS/HTTPS on the Control API server.
 apiEncryption: no
 # Path to the server key. This is needed only when encryption is yes.
@@ -154,7 +154,7 @@ apiTrustedProxies: []
 # Enable Prometheus-compatible metrics.
 metrics: no
 # Address of the metrics HTTP listener.
-metricsAddress: :9998
+metricsAddress: 127.0.0.1:9998
 # Enable TLS/HTTPS on the Metrics server.
 metricsEncryption: no
 # Path to the server key. This is needed only when encryption is yes.
@@ -177,7 +177,7 @@ metricsTrustedProxies: []
 # Enable pprof-compatible endpoint to monitor performances.
 pprof: no
 # Address of the pprof listener.
-pprofAddress: :9999
+pprofAddress: 127.0.0.1:9999
 # Enable TLS/HTTPS on the pprof server.
 pprofEncryption: no
 # Path to the server key. This is needed only when encryption is yes.

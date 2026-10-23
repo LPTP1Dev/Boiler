@@ -27,7 +27,8 @@ public final class DisplaySpeakerCommand {
 
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("speaker")
-                .requires(source -> source.getExecutor() instanceof Player)
+                .requires(source -> source.getSender().hasPermission("boiler.command.speaker")
+                        && source.getExecutor() instanceof Player)
                 .then(BoilerArguments.displayArgument(plugin)
                         .then(Commands.literal("add")
                                 .then(Commands.argument("location", ArgumentTypes.blockPosition())

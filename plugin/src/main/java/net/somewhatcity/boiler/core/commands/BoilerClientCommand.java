@@ -25,7 +25,8 @@ public final class BoilerClientCommand {
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("client")
                 .then(Commands.literal("credentials")
-                        .requires(source -> source.getExecutor() instanceof Player)
+                        .requires(source -> source.getSender().hasPermission("boiler.command.client")
+                                && source.getExecutor() instanceof Player)
                         .executes(context -> {
                             Player player = (Player) context.getSource().getExecutor();
                             if (plugin.mediaMtxAuthServer() == null) {

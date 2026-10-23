@@ -25,7 +25,7 @@ public class MediaMtxAuthServer {
     public MediaMtxAuthServer() {
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
         Thread.currentThread().setContextClassLoader(BoilerPlugin.class.getClassLoader());
-        try { app = Javalin.create().start(7000); }
+        try { app = Javalin.create().start("127.0.0.1", 7000); }
         finally { Thread.currentThread().setContextClassLoader(classLoader); }
 
         app.exception(Exception.class, (e, context) -> {
@@ -40,13 +40,19 @@ public class MediaMtxAuthServer {
             String ip = json.get("ip").getAsString();
             String user = json.get("user").getAsString();
             String password = json.get("password").getAsString();
+            String action = json.has("action") ? json.get("action").getAsString() : "";
 
 
             if(ip.equals("::1")) {
                 ctx.status(200);
             }
+            else if(user.startsWith("bs_") && !action.equals("read")) {
+                // viewer credentials may only watch streams, never publish
+                ctx.status(401);
+            }
             else {
-                if(password.equals(credentials.get(user))) {
+                String expected = credentials.get(user);
+                if(expected != null && java.security.MessageDigest.isEqual(password.getBytes(), expected.getBytes())) {
                     ctx.status(200);
                 }
                 else {

@@ -23,7 +23,8 @@ public final class DisplayRemoveCommand {
 
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("remove")
-                .requires(source -> source.getExecutor() instanceof org.bukkit.entity.Player)
+                .requires(source -> source.getSender().hasPermission("boiler.command.remove")
+                        && source.getExecutor() instanceof org.bukkit.entity.Player)
                 .then(BoilerArguments.displayArgument(plugin).executes(context -> {
                     IBoilerDisplay display = CommandContextUtil.display(context, plugin);
                     if (display == null) return SINGLE_SUCCESS;
