@@ -26,6 +26,7 @@ public final class DisplayInfoCommand {
 
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("info")
+                .requires(source -> source.getSender().hasPermission("boiler.command.info"))
                 .then(BoilerArguments.displayArgument(plugin).executes(context -> {
                     IBoilerDisplay display = CommandContextUtil.display(context, plugin);
                     if (display == null) return SINGLE_SUCCESS;

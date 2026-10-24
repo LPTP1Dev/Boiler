@@ -35,7 +35,8 @@ public final class H264Codec implements AutoCloseable {
                 av_opt_set(context.priv_data(),"preset","ultrafast",0);
                 av_opt_set(context.priv_data(),"tune","zerolatency",0);
                 av_opt_set(context.priv_data(),"crf","20",0);
-                av_opt_set(context.priv_data(),"x264-params","repeat-headers=1:annexb=1:scenecut=0",0);
+                long kbps=Math.max(500_000L,(long)width*height*6)/1000;
+                av_opt_set(context.priv_data(),"x264-params","repeat-headers=1:annexb=1:scenecut=0:vbv-maxrate="+kbps+":vbv-bufsize="+Math.max(250,kbps/2),0);
                 context.colorspace(AVCOL_SPC_BT709).color_range(AVCOL_RANGE_MPEG);
             }
             check(avcodec_open2(context,codec,(AVDictionary)null));

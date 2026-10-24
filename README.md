@@ -13,6 +13,10 @@ https://github.com/mrmrmystery/Boiler/wiki
 
 See [the performance report](docs/PERFORMANCE.md) for implementation details, the optional live-buffer mode, Java 21 build instructions, regression tests, measured raster allocations, and remaining server integration checks.
 
+## Permissions
+
+Display management commands require `boiler.command.create`, `boiler.command.remove`, `boiler.command.speaker`, `boiler.command.list` and `boiler.command.info` respectively (operators only by default), in addition to the existing `boiler.command.source`, `boiler.command.settings` and `boiler.command.action`.
+
 ## Remote control and SmartTV
 
 Activate the TV launcher with `/boiler display source <tvDisplayId> smarttv`, then put its clickable remote on another display with `/boiler display source <remoteDisplayId> remote <tvDisplayId>`. Home returns to the full TV home screen; Back sends Escape to the active app. Ordinary keyboard Shift, Escape and Home remain app inputs. The former remote item and movement lock have been removed.

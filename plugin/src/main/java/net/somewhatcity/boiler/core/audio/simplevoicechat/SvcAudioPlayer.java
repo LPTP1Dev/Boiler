@@ -34,6 +34,7 @@ public class SvcAudioPlayer {
     private volatile long position;
     private boolean stopped;
     private boolean suspended;
+    private boolean idle;
 
     public SvcAudioPlayer(IBoilerDisplay display) { this(display, false); }
     public SvcAudioPlayer(IBoilerDisplay display, boolean live) {
@@ -55,7 +56,12 @@ public class SvcAudioPlayer {
     private synchronized void playBlock() {
         if (stopped) return;
         try {
-            audioQueue.read(block);
+            // Do not encode and broadcast silence while idle, paused or between tracks.
+            if (audioQueue.read(block) == 0) {
+                if (!idle) { idle = true; encoder.resetState(); }
+                return;
+            }
+            idle = false;
             byte[] encoded = encoder.encode(block);
             for (LocationalAudioChannel channel : channels) channel.send(encoded);
             position += 20;

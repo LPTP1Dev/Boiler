@@ -37,6 +37,7 @@ class DisplayPersistenceTest {
             data.addProperty("url", "file:fixture.png");
             display.source("plain", data);
             display.save();
+            fixture.manager.flushWrites();
             Path file = directory.resolve("displays/display_1.json");
             String saved = Files.readString(file);
             var parsed = JsonParser.parseString(saved).getAsJsonObject();

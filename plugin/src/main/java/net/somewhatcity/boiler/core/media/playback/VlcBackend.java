@@ -46,7 +46,7 @@ public final class VlcBackend implements PlaybackBackend {
         this.output=output;
         live=data.has("live") && data.get("live").getAsBoolean(); loop=!live && data.has("loop") && data.get("loop").getAsBoolean();
         width=Math.max(display.width(),display.frameWidth()); height=Math.max(display.height(),display.frameHeight());
-        image=new BufferedImage(width,height,BufferedImage.TYPE_INT_RGB); pixels=new int[width*height];
+        image=new BufferedImage(width,height,BufferedImage.TYPE_INT_RGB); pixels=((java.awt.image.DataBufferInt)image.getRaster().getDataBuffer()).getData();
         factory=VlcNativeLoader.createFactory("--no-video-title-show"); player=factory.mediaPlayers().newEmbeddedMediaPlayer();
         player.audio().callback("S16L",48000,1,new AudioCallbackAdapter() {
             @Override public void play(MediaPlayer mediaPlayer,Pointer samples,int count,long pts) { if(!stopped && !ended) output.play(samples.getByteArray(0,count*2)); }
@@ -58,7 +58,6 @@ public final class VlcBackend implements PlaybackBackend {
             synchronized(frameLock) {
                 if(stopped || ended || image==null) return;
                 buffers[0].duplicate().order(ByteOrder.nativeOrder()).asIntBuffer().get(pixels);
-                image.setRGB(0,0,width,height,pixels,0,width);
             }
         },true));
         player.events().addMediaPlayerEventListener(new MediaPlayerEventAdapter() {

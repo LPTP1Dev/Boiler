@@ -130,6 +130,7 @@ class DisplayLifecycleTest {
         when(streaming.canAttach(eq(mod),anyInt(),anyInt(),anyInt())).thenReturn(true);
         when(streaming.attach(eq(mod),any())).thenReturn(true);
         when(streaming.subscribed(eq(mod),any())).thenReturn(true);
+        when(streaming.ready(any())).thenReturn(true);
         display.settings().addProperty("clientScale",2);
         display.source("plain",new JsonObject());await(()->display.source() instanceof PlainSource);
         display.tick();display.render();
@@ -157,7 +158,7 @@ class DisplayLifecycleTest {
         when(mod.getLocation()).thenReturn(new Location(world,-15,65,-9));
         bukkit.when(Bukkit::getOnlinePlayers).thenReturn(java.util.List.of(mod));
         when(streaming.available(mod)).thenReturn(true);when(streaming.canAttach(eq(mod),anyInt(),anyInt(),anyInt())).thenReturn(true);
-        when(streaming.attach(eq(mod),any())).thenReturn(true);when(streaming.subscribed(eq(mod),any())).thenReturn(true);
+        when(streaming.attach(eq(mod),any())).thenReturn(true);when(streaming.subscribed(eq(mod),any())).thenReturn(true);when(streaming.ready(any())).thenReturn(true);
         var sources=plugin.sourceManager();
         doReturn(net.somewhatcity.boiler.core.sources.SmartTVSource.class).when(sources).source("smarttv");
         JsonObject rotation=new JsonObject();rotation.addProperty("yaw",0);rotation.addProperty("pitch",0);

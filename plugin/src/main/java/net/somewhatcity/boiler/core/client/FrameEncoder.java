@@ -34,7 +34,8 @@ public final class FrameEncoder implements AutoCloseable {
             calm=changed<pixels.length/50 ? calm+1 : 0;
             wantVideo=video!=null ? calm<30 : busy>=6;
         }
-        if(changed==0 && !key && !(video!=null && !wantVideo)) return null;
+        // Unchanged frames still become the reference: callers recycle the previous pixel buffer.
+        if(changed==0 && !key && !(video!=null && !wantVideo)) {previous=pixels;return null;}
         wantVideo &= videoAllowed && !videoUnavailable && width%2==0 && height%2==0;
         if(wantVideo && video==null) {
             try {video=new H264Codec(width,height,true);key=true;}

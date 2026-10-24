@@ -22,7 +22,8 @@ public final class DisplayListCommand {
 
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("list")
-                .requires(source -> source.getExecutor() instanceof Player)
+                .requires(source -> source.getSender().hasPermission("boiler.command.list")
+                        && source.getExecutor() instanceof Player)
                 .executes(context -> {
                     Player player = (Player) context.getSource().getExecutor();
                     StringBuilder message = new StringBuilder();

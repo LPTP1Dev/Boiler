@@ -53,7 +53,12 @@ public final class ClientStreamServer implements AutoCloseable,Listener,PluginMe
                     DataInputStream in=read(Arrays.copyOfRange(ctx.data(),ctx.offset(),ctx.offset()+ctx.length()));
                     int type=type(in);
                     if(type==ACK) {int id=in.readInt();long generation=in.readLong(),sequence=in.readLong();end(in);c.ack(id,generation,sequence);}
-                    else if(type==INPUT) {Input input=input(in);end(in);if(c.allowInput() || input.action()==DRAG_END)plugin.onMain(()->handleInput(c,input));}
+                    else if(type==INPUT) {
+                        Input input=input(in);end(in);
+                        // Cursor moves only matter in their latest position: run at most one per server tick.
+                        if(input.action()==2) {if(c.allowInput() && c.queueCursor(input)) plugin.onMain(()->{Input latest=c.takeCursor();if(latest!=null)handleInput(c,latest);});}
+                        else if(c.allowInput() || input.action()==DRAG_END)plugin.onMain(()->handleInput(c,input));
+                    }
                     else c.close();
                 } catch(Exception e) {c.close();}
             });
@@ -62,10 +67,16 @@ public final class ClientStreamServer implements AutoCloseable,Listener,PluginMe
             ws.onError(ctx->disconnect(ctx.sessionId()));
         });
         app.start(BoilerConfig.streamBind,BoilerConfig.streamPort);
+        if(!loopback(BoilerConfig.streamBind) && !BoilerConfig.streamPublicUrl.startsWith("wss://"))
+            plugin.getLogger().warning("boiler.stream listens on "+BoilerConfig.streamBind+" without TLS: tickets, frames and inputs are sent in clear text. Use a TLS reverse proxy and a wss:// public_url.");
         plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin,CHANNEL);
         plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin,CHANNEL,this);
         plugin.getServer().getPluginManager().registerEvents(this,plugin);
         maintenance=plugin.getServer().getScheduler().runTaskTimer(plugin,this::maintain,20,20);
+    }
+    private static boolean loopback(String host) {
+        try {return java.net.InetAddress.getByName(host).isLoopbackAddress();}
+        catch(java.net.UnknownHostException e) {return false;}
     }
     private void maintain() {
         long now=System.currentTimeMillis();tickets.entrySet().removeIf(e->e.getValue().expires<now);
@@ -91,6 +102,8 @@ public final class ClientStreamServer implements AutoCloseable,Listener,PluginMe
         } catch(IOException ignored) {}
     }
     public boolean available(Player player) {Client c=clients.get(player.getUniqueId());return c!=null && c.open();}
+    /** True when at least one subscriber could send a new frame of this stream right now. */
+    public boolean ready(DisplayStream stream) {return clients.values().stream().anyMatch(c->c.ready(stream));}
     public boolean videoSupported(DisplayStream stream) {return clients.values().stream().noneMatch(c->c.has(stream)&&(c.capabilities&2)==0);}
     public boolean canAttach(Player player,int id,int width,int height) {Client c=clients.get(player.getUniqueId());return c!=null&&c.room(id,width,height);}
     public boolean attach(Player player,DisplayStream stream) {
@@ -179,10 +192,14 @@ public final class ClientStreamServer implements AutoCloseable,Listener,PluginMe
         final ArrayDeque<byte[]> controls=new ArrayDeque<>();
         final Map<Integer,Drag> drags=new HashMap<>();
         boolean sending,dead;long inputWindow,messageWindow;int inputs,messages;
+        Input cursor;
         Client(UUID player,WsContext socket,int capabilities){this.player=player;this.socket=socket;this.capabilities=capabilities;}
         synchronized boolean open(){return !dead&&socket.session.isOpen();}
         synchronized boolean allowMessage(){long now=System.currentTimeMillis();if(now-messageWindow>=1000){messages=0;messageWindow=now;}return ++messages<=4096;}
         synchronized boolean allowInput(){long now=System.currentTimeMillis();if(now-inputWindow>=1000){inputs=0;inputWindow=now;}return ++inputs<=120;}
+        synchronized boolean queueCursor(Input input){boolean schedule=cursor==null;cursor=input;return schedule;}
+        synchronized Input takeCursor(){Input latest=cursor;cursor=null;return latest;}
+        synchronized boolean ready(DisplayStream s){Subscription sub=subscriptions.get(s.display.id());return open()&&sub!=null&&sub.stream==s&&sub.pending==0&&!sending&&controls.isEmpty();}
         synchronized boolean has(DisplayStream s){Subscription sub=subscriptions.get(s.display.id());return open()&&sub!=null&&sub.stream==s;}
         synchronized boolean room(int id,int width,int height) {
             long used=subscriptions.values().stream().filter(s->s.stream.display.id()!=id).mapToLong(s->(long)s.stream.display.width()*s.stream.display.height()).sum();

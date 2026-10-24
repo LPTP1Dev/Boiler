@@ -79,14 +79,19 @@ public class FfmpegBackend implements PlaybackBackend {
 
     private void decode(JsonObject data) {
         boolean loop = !live && data.has("loop") && data.get("loop").getAsBoolean();
-        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(data.get("url").getAsString());
+        String url = data.get("url").getAsString();
+        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(url);
              Java2DFrameConverter converter = new Java2DFrameConverter()) {
+            grabber.setOption("protocol_whitelist", MediaLocator.ffmpegProtocols(url));
             grabber.setAudioChannels(1); grabber.setSampleRate(48000); grabber.setSampleFormat(avutil.AV_SAMPLE_FMT_S16);
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24); grabber.setTimeout(5000); grabber.setOption("rw_timeout", "5000000");
             // Frame threading can buffer many video frames while audio is already returned.
             // A bounded interleaved queue then presents video in catch-up bursts. Slice
             // threading retains codec parallelism without that extra frame pipeline delay.
             grabber.setVideoOption("thread_type", "slice");
+            // Let swscale resize once instead of rescaling every frame in Java2D.
+            grabber.setImageWidth(Math.max(display.width(), display.frameWidth()));
+            grabber.setImageHeight(Math.max(display.height(), display.frameHeight()));
             grabber.start();
             durationMicros = Math.max(0, grabber.getLengthInTime());
             var context = grabber.getFormatContext();

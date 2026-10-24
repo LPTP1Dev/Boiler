@@ -47,7 +47,7 @@ public final class DJControllerSource implements IBoilerSource, CancellableLoad 
                 audio = createAudio(display);
                 try {
                     worker = plugin.runtime().startWorker("dj-" + display.id(), () -> {
-                        try { engine.run(audio::play, display::tick); }
+                        try { engine.run(audio::play, () -> {}); }
                         finally { audio.stop(); }
                     });
                 } catch (RuntimeException error) { audio.stop(); throw error; }
@@ -119,7 +119,7 @@ public final class DJControllerSource implements IBoilerSource, CancellableLoad 
             return null;
         });
         preparations[deck] = task;
-        try { plugin.runtime().io().execute(task); }
+        try { plugin.runtime().startWorker("dj-load-" + display.id() + "-" + deck, task); }
         catch (RejectedExecutionException error) { task.cancel(true); loading.set(deck, "Beschaeftigt"); }
     }
     private static void close(DjTrack track) { try { track.close(); } catch (Exception ignored) {} }

@@ -74,7 +74,7 @@ public class YoutubeSource implements IBoilerSource, CancellableLoad {
                     String url = json.get("url").getAsString();
 
                     JsonObject load = new JsonObject();
-                    load.addProperty("url", url);
+                    load.addProperty("url", net.somewhatcity.boiler.core.media.playback.MediaLocator.requireHttps(url));
                     load.addProperty("buffer", 10);
                     load.addProperty("keepLastSourceData", true);
                     display.source("mediaplayer", load);

@@ -171,9 +171,14 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
         if (source == null || sourceType == SourceType.CLIENT || (long)width()*height() > net.somewhatcity.boiler.stream.StreamProtocol.MAX_PIXELS || width()>2048 || height()>2048) return false;
         if (!net.somewhatcity.boiler.core.client.DisplayGeometry.hasNativeRotation(settings,FACING) || settings.has("visualDirection") && !settings.get("visualDirection").getAsString().equals(FACING.name())
                 || settings.has("itemRotation") && settings.get("itemRotation").getAsInt()!=0) return false;
-        try { return source.getClass().getMethod("draw", Graphics2D.class, Rectangle.class).getDeclaringClass()!=IBoilerSource.class; }
-        catch (NoSuchMethodException e) { return false; }
+        return COLOR_DRAWING.get(source.getClass());
     }
+    private static final ClassValue<Boolean> COLOR_DRAWING = new ClassValue<>() {
+        @Override protected Boolean computeValue(Class<?> type) {
+            try { return type.getMethod("draw", Graphics2D.class, Rectangle.class).getDeclaringClass()!=IBoilerSource.class; }
+            catch (NoSuchMethodException e) { return false; }
+        }
+    };
 
     private net.somewhatcity.boiler.core.client.DisplayStream createColorStream(net.somewhatcity.boiler.core.client.ClientStreamServer server) {
         String mode=settings.has("clientCodec") ? settings.get("clientCodec").getAsString() : BoilerConfig.streamCodec;
@@ -412,10 +417,10 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
     @Override public void onRemoteAction(CommandSender sender, net.somewhatcity.boiler.api.util.RemoteAction action) {
         withSource(s -> { if (s.remoteActions().contains(action)) s.onRemoteAction(sender, action); });
     }
+    // Read-only query, polled by remotes on the server thread: do not wait for a frame being drawn.
     @Override public Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() {
-        renderLock.lock();
-        try { return source == null || removed ? Set.of() : Set.copyOf(source.remoteActions()); }
-        finally { renderLock.unlock(); }
+        IBoilerSource current = source;
+        return current == null || removed ? Set.of() : Set.copyOf(current.remoteActions());
     }
     private void withSource(java.util.function.Consumer<IBoilerSource> action) {
         // MapEngine may deliver clicks on Netty threads. Never enter a source or hold

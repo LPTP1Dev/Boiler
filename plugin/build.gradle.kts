@@ -1,7 +1,7 @@
 plugins {
     id("com.gradleup.shadow") version "8.3.11"
     id("net.minecrell.plugin-yml.bukkit") version "0.6.0"
-    id("com.modrinth.minotaur") version "2.+"
+    id("com.modrinth.minotaur") version "2.10.0"
 }
 
 repositories {
@@ -47,8 +47,8 @@ dependencies {
     implementation("net.java.dev.jna:jna-platform:5.14.0")
     implementation("io.javalin:javalin:6.4.0")
 
-    implementation("io.netty:netty-buffer:4.1.116.Final")
-    implementation("io.netty:netty-codec:4.1.116.Final")
+    implementation("io.netty:netty-buffer:4.1.118.Final")
+    implementation("io.netty:netty-codec:4.1.118.Final")
 
     //compileOnlyApi("org.bytedeco:javacv-platform:1.5.11")
 

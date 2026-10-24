@@ -39,7 +39,7 @@ public class TwitchSource implements IBoilerSource, CancellableLoad {
         OkHttpClient client = BoilerPlugin.getPlugin().runtime().http();
 
         Request request = new Request.Builder()
-                .url("https://pwn.sh/tools/streamapi.py?url=%s".formatted(data.get("url").getAsString()))
+                .url("https://pwn.sh/tools/streamapi.py?url=%s".formatted(java.net.URLEncoder.encode(data.get("url").getAsString(), java.nio.charset.StandardCharsets.UTF_8)))
                 .get()
                 .build();
 
@@ -49,7 +49,7 @@ public class TwitchSource implements IBoilerSource, CancellableLoad {
             JsonObject obj = (JsonObject) JsonParser.parseString(response.body().string());
             String streamUrl = obj.getAsJsonObject("urls").get("480p").getAsString();
             JsonObject load = new JsonObject();
-            load.addProperty("url", streamUrl);
+            load.addProperty("url", net.somewhatcity.boiler.core.media.playback.MediaLocator.requireHttps(streamUrl));
             load.addProperty("buffer", 100);
             load.addProperty("live", true);
             load.addProperty("keepLastSourceData", true);

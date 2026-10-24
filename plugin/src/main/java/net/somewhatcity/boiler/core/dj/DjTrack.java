@@ -17,6 +17,7 @@ public final class DjTrack implements AutoCloseable {
     public final DjBeatGrid beats;
     private final Path cache;
     private final FileChannel channel;
+    private static final long MAX_BYTES = 48_000L * 2 * 60 * 60 * 2;
     private final ByteBuffer read = ByteBuffer.allocate(8192).order(ByteOrder.LITTLE_ENDIAN);
 
     private DjTrack(String name, Path cache, DjWaveform waveform, DjBeatGrid beats) throws IOException {
@@ -34,6 +35,7 @@ public final class DjTrack implements AutoCloseable {
         try {
             try (FFmpegFrameGrabber decoder = new FFmpegFrameGrabber(path.toString());
                  FileChannel out = FileChannel.open(cache, StandardOpenOption.WRITE)) {
+                decoder.setOption("protocol_whitelist", "file");
                 decoder.setAudioChannels(1); decoder.setSampleRate(48000); decoder.setSampleFormat(AV_SAMPLE_FMT_S16);
                 decoder.start();
                 if (!decoder.hasAudio()) throw new IOException("Datei enthält kein Audio");
@@ -48,6 +50,7 @@ public final class DjTrack implements AutoCloseable {
                         int count = Math.min(input.remaining(), bytes.capacity() / 2);
                         for (int i = 0; i < count; i++) { short sample = input.get(); bytes.putShort(sample); waveform.add(sample); beats.add(sample); }
                         bytes.flip(); while (bytes.hasRemaining()) out.write(bytes);
+                        if (out.size() > MAX_BYTES) throw new IOException("Track ist länger als 2 Stunden");
                     }
                     if (decoder.getLengthInTime() > 0)
                         progress.accept((int)Math.min(99, 100 * frame.timestamp / decoder.getLengthInTime()));

@@ -38,6 +38,8 @@ public class UpdateIntervalManager {
         File file = new File(plugin.getDataFolder(), "intervals.ser");
         if(!file.exists()) return;
         try (ObjectInputStream input = new ObjectInputStream(new FileInputStream(file))) {
+            input.setObjectInputFilter(java.io.ObjectInputFilter.Config.createFilter(
+                    "java.util.HashMap;java.util.UUID;java.lang.Integer;java.lang.Number;!*"));
             Object stored = input.readObject();
             if (!(stored instanceof java.util.Map<?, ?> values)) throw new StreamCorruptedException("Invalid interval data");
             java.util.concurrent.ConcurrentHashMap<UUID, Integer> loaded = new java.util.concurrent.ConcurrentHashMap<>();

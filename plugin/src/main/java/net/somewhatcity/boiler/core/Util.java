@@ -29,7 +29,7 @@ public class Util {
     public static void sendMsg(CommandSender sender, String msg, Object... args) {
         String[] colored = new String[args.length];
         for(int i = 0; i < args.length; i++) {
-            colored[i] = "<color:#52a3ff>" + args[i].toString() + "</color>";
+            colored[i] = "<color:#52a3ff>" + MM.escapeTags(args[i].toString()) + "</color>";
         }
 
         sender.sendMessage(PREFIX.append(MM.deserialize(msg.formatted((Object[]) colored))));
@@ -38,7 +38,7 @@ public class Util {
     public static void sendErrMsg(CommandSender sender, String msg, Object... args) {
         String[] colored = new String[args.length];
         for(int i = 0; i < args.length; i++) {
-            colored[i] = "<b><color:#52a3ff>" + args[i].toString() + "</color></b>";
+            colored[i] = "<b><color:#52a3ff>" + MM.escapeTags(args[i].toString()) + "</color></b>";
         }
 
         sender.sendMessage(PREFIX.append(MM.deserialize("<b><color:#ff4a56>[Error]</color></b> ")).append(MM.deserialize(msg.formatted((Object[]) colored))));

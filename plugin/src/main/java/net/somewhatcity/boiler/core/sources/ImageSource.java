@@ -31,6 +31,8 @@ import java.util.Base64;
         @CreateArgument(name = "url", type = CommandArgumentType.GREEDY_STRING)
 })
 public class ImageSource implements IBoilerSource, CancellableLoad {
+    // Bounds protect the server heap from huge downloads and decompression bombs.
+    private static final int MAX_DOWNLOAD = 32 * 1024 * 1024, MAX_SIDE = 4096, MAX_STORED = 2 * 1024 * 1024;
     private BufferedImage image;
     private volatile okhttp3.Call call;
     private volatile boolean cancelled;
@@ -54,7 +56,7 @@ public class ImageSource implements IBoilerSource, CancellableLoad {
                 url = url.substring(5);
                 File imageFile = new File(url);
                 if(imageFile.exists() && imageFile.isFile()) {
-                    image = ImageIO.read(imageFile);
+                    image = read(imageFile);
                 } else {
                     obj.addProperty("message", "File not found");
                     display.source("error", obj);
@@ -65,14 +67,17 @@ public class ImageSource implements IBoilerSource, CancellableLoad {
                     String base64EncodedImage = data.get("base64").getAsString();
                     byte[] imageData = Base64.getDecoder().decode(base64EncodedImage);
                     ByteArrayInputStream bais = new ByteArrayInputStream(imageData);
-                    image = ImageIO.read(bais);
+                    image = read(bais);
 
                 } else {
                     call = net.somewhatcity.boiler.core.BoilerPlugin.getPlugin().runtime().http().newCall(new okhttp3.Request.Builder().url(url).build());
                     if (cancelled || Thread.currentThread().isInterrupted()) call.cancel();
                     try (okhttp3.Response response = call.execute()) {
                         if (!response.isSuccessful() || response.body() == null) throw new IOException("Image request failed: " + response.code());
-                        image = ImageIO.read(response.body().byteStream());
+                        if (response.body().contentLength() > MAX_DOWNLOAD) throw new IOException("Image is too large");
+                        byte[] downloaded = response.body().byteStream().readNBytes(MAX_DOWNLOAD + 1);
+                        if (downloaded.length > MAX_DOWNLOAD) throw new IOException("Image is too large");
+                        image = read(new ByteArrayInputStream(downloaded));
                     }
                     if (image == null) throw new IOException("Unsupported image format");
 
@@ -82,14 +87,31 @@ public class ImageSource implements IBoilerSource, CancellableLoad {
                     byte[] imageData = baos.toByteArray();
                     String base64EncodedImage = Base64.getEncoder().encodeToString(imageData);
 
-                    data.addProperty("base64", base64EncodedImage);
-                    display.saveSourceData(data);
+                    // Large images are fetched again on load instead of bloating the display file.
+                    if (base64EncodedImage.length() <= MAX_STORED) {
+                        data.addProperty("base64", base64EncodedImage);
+                        display.saveSourceData(data);
+                    }
                 }
             }
             if (image == null) throw new IOException("Unsupported image format");
         } catch (IOException e) {
             obj.addProperty("message",e.getMessage());
             display.source("error", obj);
+        }
+    }
+
+    private static BufferedImage read(Object input) throws IOException {
+        try (javax.imageio.stream.ImageInputStream stream = ImageIO.createImageInputStream(input)) {
+            if (stream == null) throw new IOException("Unsupported image format");
+            java.util.Iterator<javax.imageio.ImageReader> readers = ImageIO.getImageReaders(stream);
+            if (!readers.hasNext()) throw new IOException("Unsupported image format");
+            javax.imageio.ImageReader reader = readers.next();
+            try {
+                reader.setInput(stream, true, true);
+                if (reader.getWidth(0) > MAX_SIDE || reader.getHeight(0) > MAX_SIDE) throw new IOException("Image is too large");
+                return reader.read(0);
+            } finally { reader.dispose(); }
         }
     }
 

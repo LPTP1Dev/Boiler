@@ -39,9 +39,14 @@ public class ImplDisplayManager implements IDisplayManager, AutoCloseable {
     private final BukkitTask loadTask;
     private int nextTransientId = -1;
     private volatile boolean closed;
+    // Display files are serialized on the server thread but written on an I/O worker, latest state wins.
+    private final Map<Integer, String> pendingWrites = new ConcurrentHashMap<>();
+    private final Object writeLock = new Object();
+    private final net.somewhatcity.boiler.core.runtime.LatestTaskQueue writes;
 
     public ImplDisplayManager(BoilerPlugin plugin) {
         this.plugin = plugin;
+        writes = new net.somewhatcity.boiler.core.runtime.LatestTaskQueue(plugin.runtime().io());
         loadTask = Bukkit.getScheduler().runTaskLater(plugin, this::loadDisplays, 20);
         tickTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             Map<UUID, List<ViewerPosition>> positions = viewerPositions();
@@ -119,8 +124,21 @@ public class ImplDisplayManager implements IDisplayManager, AutoCloseable {
             speakers.add(value);
         }
         object.add("speakers", speakers);
-        try { AtomicFiles.write(file(display.id()), GSON.toJson(object)); }
-        catch (IOException e) { throw new UncheckedIOException(e); }
+        pendingWrites.put(display.id(), GSON.toJson(object));
+        try { writes.submit(this::flushWrites); }
+        catch (java.util.concurrent.RejectedExecutionException e) { flushWrites(); }
+    }
+
+    /** Writes every pending display file. Also called synchronously on close. */
+    public void flushWrites() {
+        for (Integer id : List.copyOf(pendingWrites.keySet())) {
+            synchronized (writeLock) {
+                String json = pendingWrites.remove(id);
+                if (json == null) continue;
+                try { AtomicFiles.write(file(id), json); }
+                catch (IOException e) { plugin.getLogger().log(Level.WARNING, "Saving display " + id, e); }
+            }
+        }
     }
 
     private Path file(int id) { return plugin.getDataFolder().toPath().resolve("displays/display_" + id + ".json"); }
@@ -134,8 +152,11 @@ public class ImplDisplayManager implements IDisplayManager, AutoCloseable {
         byMap.remove(display.mapDisplay(), display);
         display.remove();
         if (display.persistent()) {
-            try { Files.deleteIfExists(file(display.id())); }
-            catch (IOException e) { throw new UncheckedIOException(e); }
+            synchronized (writeLock) {
+                pendingWrites.remove(display.id());
+                try { Files.deleteIfExists(file(display.id())); }
+                catch (IOException e) { throw new UncheckedIOException(e); }
+            }
         }
     }
     @Override public void removeDisplay(int id) { removeDisplay(display(id)); }
@@ -192,5 +213,7 @@ public class ImplDisplayManager implements IDisplayManager, AutoCloseable {
         }
         displays.clear();
         byMap.clear();
+        writes.close();
+        flushWrites();
     }
 }

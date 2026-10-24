@@ -27,8 +27,8 @@ public final class DisplayCreateCommand {
 
     public LiteralArgumentBuilder<CommandSourceStack> build() {
         return Commands.literal("create")
-                .requires(source -> source.getSender().hasPermission("boiler.command.create"))
-                .requires(source -> source.getExecutor() instanceof Player)
+                .requires(source -> source.getSender().hasPermission("boiler.command.create")
+                        && source.getExecutor() instanceof Player)
                 .then(Commands.argument("posA", ArgumentTypes.blockPosition())
                         .then(Commands.argument("posB", ArgumentTypes.blockPosition())
                                 .executes(context -> {
