@@ -7,6 +7,7 @@ import net.somewhatcity.boiler.api.CreateCommandArguments;
 import net.somewhatcity.boiler.api.IBoilerSource;
 import net.somewhatcity.boiler.api.display.IBoilerDisplay;
 import net.somewhatcity.boiler.api.util.SourceType;
+import net.somewhatcity.boiler.api.util.RemoteAction;
 import net.somewhatcity.boiler.core.BoilerPlugin;
 import net.somewhatcity.boiler.core.Util;
 import net.somewhatcity.boiler.core.display.CompositeSource;
@@ -25,9 +26,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.Set;
+import java.util.EnumSet;
 
 public final class SmartTVSource implements IBoilerSource, CompositeSource {
+    private static final Set<String> HOME_SOURCES = Set.of("youtube-tv", "browser", "mediaplayer", "djcontroller");
     private record SettingPrompt(UUID player, DisplaySetting option) {}
+    private record TextPrompt(UUID player, IBoilerSource app) {}
     private static final class Prompt {
         final UUID player;
         final String source;
@@ -49,10 +54,25 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
     private int selected;
     private Prompt prompt;
     private SettingPrompt settingPrompt;
+    private TextPrompt textPrompt;
+    private boolean playbackStopped;
+    private String lastPlaybackName;
+    private JsonObject lastPlaybackData;
     private final List<String> recent = new ArrayList<>();
     private SmartTvMenu.Focus focus = SmartTvMenu.Focus.APPS;
     private int focusIndex, category, settingsSelected;
     private boolean settingsOpen;
+    private volatile SmartTvSettings.View settingsView;
+    private volatile String settingsMessage = "";
+    private final RasterRenderer overlayRaster = new RasterRenderer();
+    private final IBoilerSource overlay = new IBoilerSource() {
+        @Override public void load(IBoilerDisplay display, JsonObject data) {}
+        @Override public void unload() {}
+        @Override public void draw(Graphics2D graphics, Rectangle viewport) {
+            SmartTvSettings.View view = settingsView;
+            if (view != null) SmartTvSettings.draw(graphics,viewport.width,viewport.height,view,settingsMessage);
+        }
+    };
     private volatile boolean playing;
     private volatile boolean stopped;
 
@@ -79,19 +99,24 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
 
     private List<String> availableSources() {
         return plugin.sourceManager().commandVisibleSourceNames().stream()
-                .filter(name -> !name.equals("smarttv") && !name.equals("default") && !name.equals("error"))
+                .filter(HOME_SOURCES::contains)
                 .filter(name -> plugin.sourceManager().source(name) != null).sorted().toList();
     }
 
     private void updateMenu(String message) {
+        if (playbackStopped) message = "Gestoppt · Wiedergabe zum Neustart";
         SmartTvSettings.View settings = settingsOpen ? new SmartTvSettings.View(
                 Arrays.stream(DisplaySetting.values()).map(option -> option.value(display)).toList(), settingsSelected) : null;
+        settingsView = settings;
+        settingsMessage = message;
         menu.view(new SmartTvMenu.View(sources, selected, message, playing,
                 recent.stream().filter(availableSources()::contains).toList(), category, focus, focusIndex, settings));
     }
 
     private void changed() {
         if (stopped) return;
+        if (textPrompt != null && textPrompt.app() != child.source()) cancelPrompt();
+        if (settingsOpen) child.overlay(true);
         updateMenu(child.status());
         display.respawn();
         display.tick();
@@ -109,7 +134,7 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         display.saveSourceData(state);
     }
 
-    @Override public SourceType effectiveSourceType() { return playing && child != null ? child.sourceType() : null; }
+    @Override public SourceType effectiveSourceType() { return !settingsOpen && playing && child != null ? child.sourceType() : null; }
 
     private boolean allowed(CommandSender sender) { return !stopped && sender.hasPermission("boiler.command.action"); }
 
@@ -121,22 +146,97 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         return true;
     }
 
-    private UUID promptOwner() { return prompt != null ? prompt.player : settingPrompt != null ? settingPrompt.player() : null; }
+    private UUID promptOwner() { return prompt != null ? prompt.player : settingPrompt != null ? settingPrompt.player() : textPrompt != null ? textPrompt.player() : null; }
+
+    @Override public Set<RemoteAction> remoteActions() {
+        if (stopped) return Set.of();
+        EnumSet<RemoteAction> actions = EnumSet.of(RemoteAction.HOME, RemoteAction.BACK, RemoteAction.SETTINGS, RemoteAction.OK);
+        if (playing) {
+            actions.add(RemoteAction.STOP);
+            if (playbackStopped && lastPlaybackName != null) actions.add(RemoteAction.PLAY_PAUSE);
+            else if (child != null) {
+                actions.addAll(child.remoteActions());
+                if (!settingsOpen && child.source() != null) actions.add(RemoteAction.TEXT_INPUT);
+            }
+        }
+        return Set.copyOf(actions);
+    }
+
+    @Override public void onRemoteAction(CommandSender sender, RemoteAction action) {
+        if (!allowed(sender)) return;
+        UUID owner = promptOwner();
+        if (owner != null && (!(sender instanceof Player player) || !player.getUniqueId().equals(owner))) { busy(sender); return; }
+        switch (action) {
+            case HOME -> home();
+            case BACK -> {
+                if (owner != null) cancelPrompt();
+                else if (settingsOpen) closeSettings();
+                else if (playing && !playbackStopped) child.withSource(app -> app.onKey(sender, "ESCAPE"));
+                else if (!playing && category != 0) home();
+                else if (!playing) { focus = SmartTvMenu.Focus.APPS; focusIndex = 0; updateMenu(""); }
+            }
+            case SETTINGS -> {
+                if (!settingsAllowed(sender)) return;
+                if (settingsOpen) { if (owner != null) cancelPrompt(); closeSettings(); }
+                else { if (owner != null) cancelPrompt(); openSettings(sender); }
+            }
+            case OK -> {
+                if (busy(sender)) return;
+                onKey(sender, "ENTER");
+            }
+            case STOP -> {
+                if (!playing) return;
+                cancelPrompt();
+                if (!playbackStopped && child.remoteActions().contains(RemoteAction.STOP)) { delegateAction(sender,action); return; }
+                playbackStopped = true; child.stop(); updateMenu("");
+            }
+            case PLAY_PAUSE -> {
+                if (playbackStopped && lastPlaybackName != null) {
+                    if (!sender.hasPermission("boiler.command.source")) { Util.sendErrMsg(sender, "Keine Berechtigung zum Starten der Quelle."); return; }
+                    play(lastPlaybackName, lastPlaybackData.deepCopy());
+                } else delegateAction(sender, action);
+            }
+            case TEXT_INPUT -> {
+                if (busy(sender) || settingsOpen || !playing || playbackStopped || child.source() == null || !(sender instanceof Player player)) return;
+                textPrompt = new TextPrompt(player.getUniqueId(), child.source());
+                if (!plugin.smartTvInputs().request(this, player, input -> display.onInput(player, input), this::cancelPrompt)) {
+                    textPrompt = null; Util.sendErrMsg(sender, "Du hast bereits eine andere SmartTV-Eingabe geöffnet."); return;
+                }
+                plugin.smartTvInputs().show(this, player, "Text für die TV-App", "Text", "", "");
+            }
+            default -> { if (!busy(sender)) delegateAction(sender, action); }
+        }
+    }
+
+    private void delegateAction(CommandSender sender, RemoteAction action) {
+        if (!playing || playbackStopped || !child.remoteActions().contains(action)) return;
+        child.withSource(app -> app.onRemoteAction(sender, action));
+    }
+
+    private void home() {
+        cancelPrompt();
+        settingsOpen = false; playbackStopped = false; playing = false;
+        child.overlay(false);
+        category = 0; focus = SmartTvMenu.Focus.APPS; focusIndex = 0;
+        child.stop(); refreshSources(); updateMenu("");
+    }
 
     @Override public void onKey(CommandSender sender, String key) {
         if (!allowed(sender)) return;
         String normalized = key.equals(" ") ? "SPACE" : key.toUpperCase(Locale.ROOT);
-        if (normalized.equals("SHIFT") || normalized.equals("ESCAPE")) {
+        if (playing && !settingsOpen) {
+            if (!busy(sender) && !playbackStopped) child.withSource(source -> source.onKey(sender, key));
+            return;
+        }
+        if (normalized.equals("ESCAPE")) {
             if (promptOwner() != null) {
                 if (sender instanceof Player player && player.getUniqueId().equals(promptOwner())) cancelPrompt();
                 else busy(sender);
-            } else if (settingsOpen) { settingsOpen = false; updateMenu(""); }
-            else if (playing) back();
+            } else if (settingsOpen) closeSettings();
             return;
         }
         if (busy(sender)) return;
         if (settingsOpen) { settingsKey(sender, normalized); return; }
-        if (playing) { child.withSource(source -> source.onKey(sender, key)); return; }
         refreshSources();
         if (SmartTvMenu.layout(display.width(), display.height()).large()) { homeKey(sender, normalized); return; }
         int columns = SmartTvMenu.layout(display.width(), display.height()).columns();
@@ -188,6 +288,12 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         focus = SmartTvMenu.Focus.APPS;
         selectedName = sources.get(selected);
         choose(sender, right);
+    }
+
+    @Override public void onDrag(CommandSender sender, int x, int y, boolean right, net.somewhatcity.boiler.api.util.DragPhase phase) {
+        if (!allowed(sender) || busy(sender)) return;
+        if (!settingsOpen && playing) child.withSource(source -> source.onDrag(sender, x, y, right, phase));
+        else if (phase == net.somewhatcity.boiler.api.util.DragPhase.START) onClick(sender, x, y, right);
     }
 
     @Override public void onScroll(CommandSender sender, int x, int y, int delta) {
@@ -270,7 +376,16 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         if (!settingsAllowed(sender)) return;
         settingsOpen = true;
         settingsSelected = 0;
+        child.overlay(true);
         updateMenu("");
+        display.tick();
+    }
+
+    private void closeSettings() {
+        settingsOpen = false;
+        child.overlay(false);
+        updateMenu(playing ? child.status() : "");
+        display.tick();
     }
 
     private void settingsKey(CommandSender sender, String key) {
@@ -309,14 +424,14 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
                 Util.sendErrMsg(player, "Du hast bereits eine andere SmartTV-Eingabe geöffnet.");
                 return;
             }
-            Util.sendMsg(player, "%s: Neuen Zahlenwert im Chat eingeben (aktuell %s). 'abbrechen' beendet die Eingabe.", option.label, option.raw(display));
-            updateMenu("Chat-Eingabe: " + option.label);
+            showSetting(player, "", option.raw(display));
+            updateMenu("Eingabedialog: " + option.label);
         } else Util.sendErrMsg(sender, "Die Eingabe benötigt einen Spieler.");
     }
 
     private void settingsClick(CommandSender sender, int x, int y, boolean right) {
         SmartTvSettings.Layout layout = new SmartTvSettings.Layout(display.width(), display.height(), settingsSelected);
-        if (layout.back().contains(x, y)) { settingsOpen = false; updateMenu(""); return; }
+        if (layout.back().contains(x, y)) { closeSettings(); return; }
         for (DisplaySetting.Group group : DisplaySetting.Group.values()) if (layout.category(group.ordinal()).contains(x, y)) {
             settingsSelected = Arrays.stream(DisplaySetting.values()).filter(option -> option.group == group).findFirst().orElseThrow().ordinal();
             updateMenu(""); return;
@@ -339,7 +454,7 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         if (!settingsAllowed(sender) || input.trim().equalsIgnoreCase("abbrechen")) { cancelPrompt(); return; }
         try { settingPrompt.option().apply(display, input); }
         catch (IllegalArgumentException e) {
-            Util.sendErrMsg(sender, "Ungültiger Wert: %s. Bitte erneut eingeben oder 'abbrechen'.", e.getMessage());
+            showSetting(player, "Ungültiger Wert: " + e.getMessage(), input);
             return;
         }
         settingPrompt = null;
@@ -358,8 +473,11 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         if (type == null) { refreshSources(); updateMenu("Quelle nicht mehr verfügbar"); return; }
         CreateCommandArguments annotation = type.getAnnotation(CreateCommandArguments.class);
         CreateArgument[] arguments = annotation == null ? new CreateArgument[0] : annotation.arguments();
+        // Browser is a launcher app: every launch opens Google without a URL form.
+        if (selectedName.equals("browser")) arguments = Arrays.stream(arguments).filter(argument -> !argument.name().equals("url")).toArray(CreateArgument[]::new);
         JsonObject remembered = parameters.has(selectedName) && parameters.get(selectedName).isJsonObject()
                 ? parameters.getAsJsonObject(selectedName).deepCopy() : new JsonObject();
+        if (selectedName.equals("browser")) remembered.addProperty("url", "https://www.google.com/");
         boolean complete = true;
         for (CreateArgument argument : arguments) {
             try {
@@ -369,7 +487,7 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         }
         if (arguments.length == 0 || (!edit && complete)) { play(selectedName, remembered); return; }
         if (!(sender instanceof Player player)) {
-            Util.sendErrMsg(sender, "Die Einrichtung benötigt einen Spieler für die Chat-Abfrage."); return;
+            Util.sendErrMsg(sender, "Die Einrichtung benötigt einen Spieler für den Eingabedialog."); return;
         }
         prompt = new Prompt(player, selectedName, arguments, remembered);
         if (!plugin.smartTvInputs().request(this, player, input -> display.onInput(player, input), this::cancelPrompt)) {
@@ -379,12 +497,16 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         ask(player);
     }
 
-    private void ask(Player player) {
+    private void showSetting(Player player, String error, String initial) {
+        plugin.smartTvInputs().show(this, player, "SmartTV · Einstellungen", settingPrompt.option().label, initial, error);
+    }
+
+    private void ask(Player player) { ask(player, "", null); }
+    private void ask(Player player, String error, String previousInput) {
         CreateArgument argument = prompt.arguments[prompt.index];
-        String previous = prompt.data.has(argument.name()) ? " (Punkt = bisherigen Wert übernehmen)" : "";
-        Util.sendMsg(player, "SmartTV %s: %s (%s) im Chat eingeben%s. 'abbrechen' beendet die Eingabe.",
-                prompt.source, argument.name(), argument.type(), previous);
-        updateMenu("Chat: " + argument.name());
+        String initial = previousInput != null ? previousInput : prompt.data.has(argument.name()) ? prompt.data.get(argument.name()).getAsString() : "";
+        plugin.smartTvInputs().show(this, player, "SmartTV · " + SmartTvStyle.label(prompt.source), argument.name() + " (" + argument.type() + ")", initial, error);
+        updateMenu("Eingabedialog: " + argument.name());
     }
 
     public static void parse(String input, CreateArgument argument, JsonObject target) {
@@ -412,9 +534,17 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
             if (promptOwner() != null && sender instanceof Player player && player.getUniqueId().equals(promptOwner())) cancelPrompt();
             return;
         }
+        if (textPrompt != null) {
+            if (!(sender instanceof Player player) || !player.getUniqueId().equals(textPrompt.player())) { busy(sender); return; }
+            if (input.trim().equalsIgnoreCase("abbrechen") || child.source() != textPrompt.app()) { cancelPrompt(); return; }
+            IBoilerSource app = textPrompt.app();
+            textPrompt = null; plugin.smartTvInputs().release(this);
+            child.withSource(current -> { if (current == app) current.onInput(sender, input); });
+            return;
+        }
         if (settingPrompt != null) { settingInput(sender, input); return; }
         if (prompt == null) {
-            if (playing) child.withSource(source -> source.onInput(sender, input));
+            if (playing && !settingsOpen) child.withSource(source -> source.onInput(sender, input));
             return;
         }
         if (!(sender instanceof Player player) || !player.getUniqueId().equals(prompt.player)) { busy(sender); return; }
@@ -425,8 +555,7 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
             String value = input.equals(".") && prompt.data.has(argument.name()) ? prompt.data.get(argument.name()).getAsString() : input;
             parse(value, argument, prompt.data);
         } catch (RuntimeException e) {
-            Util.sendErrMsg(sender, "Ungültiger Wert für %s (%s). Bitte erneut eingeben.", argument.name(), argument.type());
-            ask(player); return;
+            ask(player, "Ungültiger Wert für " + argument.name() + " (" + argument.type() + "). Bitte korrigieren.", input); return;
         }
         if (++prompt.index < prompt.arguments.length) { ask(player); return; }
         Prompt completed = prompt;
@@ -436,6 +565,9 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
     }
 
     private void play(String name, JsonObject data) {
+        playbackStopped = false;
+        lastPlaybackName = name;
+        lastPlaybackData = data.deepCopy();
         recent.remove(name);
         recent.addFirst(name);
         if (recent.size() > 6) recent.removeLast();
@@ -446,28 +578,28 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
     private void cancelPrompt() {
         prompt = null;
         settingPrompt = null;
+        textPrompt = null;
         if (plugin.smartTvInputs() != null) plugin.smartTvInputs().release(this);
         updateMenu("Eingabe abgebrochen");
     }
 
-    private void back() {
-        playing = false;
-        child.stop();
-        refreshSources();
-        updateMenu("");
-    }
-
     @Override public void draw(IDrawingSpace drawingSpace) {
-        if (playing && child.source() != null) child.draw(drawingSpace, display.width(), display.height());
+        if (playing && child.source() != null) {
+            child.draw(drawingSpace, display.width(), display.height());
+            if (settingsView != null) drawingSpace.image(overlayRaster.drawImage(overlay,display.width(),display.height()),0,0);
+        }
         else raster.draw(menu, drawingSpace, display.width(), display.height());
     }
     @Override public void draw(Graphics2D graphics, Rectangle viewport) {
-        if (playing && child.source() != null) child.draw(graphics, viewport); else menu.draw(graphics, viewport);
+        if (playing && child.source() != null) {
+            child.draw(graphics, viewport);
+            if (settingsView != null) graphics.drawImage(overlayRaster.drawImage(overlay,viewport.width,viewport.height),viewport.x,viewport.y,null);
+        } else menu.draw(graphics, viewport);
     }
     @Override public byte[] provide20msAudio() { return playing ? child.audio() : null; }
     @Override public void onResize() { child.withSource(IBoilerSource::onResize); }
     @Override public void onCursorMove(CommandSender sender, int x, int y) {
-        if (allowed(sender) && playing) child.withSource(source -> source.onCursorMove(sender, x, y));
+        if (allowed(sender) && !settingsOpen && promptOwner() == null && playing) child.withSource(source -> source.onCursorMove(sender, x, y));
     }
     @Override public void unload() {
         if (stopped) return;
@@ -475,6 +607,7 @@ public final class SmartTVSource implements IBoilerSource, CompositeSource {
         plugin.onMain(() -> { if (plugin.smartTvInputs() != null) plugin.smartTvInputs().release(this); });
         if (child != null) child.close();
         raster.clear();
+        overlayRaster.clear();
         menu.unload();
     }
 }

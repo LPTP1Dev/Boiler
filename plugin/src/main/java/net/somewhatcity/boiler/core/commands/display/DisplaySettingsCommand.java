@@ -45,6 +45,11 @@ public final class DisplaySettingsCommand {
                         .then(integerSetting("itemRotation", "rotation", true))
                         .then(directionSetting())
                         .then(rotationSetting())
+                        .then(codecSetting())
+                        .then(Commands.literal("clientScale").then(Commands.argument("scale",integer(1,4)).executes(context->{
+                            IBoilerDisplay display=CommandContextUtil.display(context,plugin);
+                            if(display!=null){int scale=getInteger(context,"scale");display.settings().addProperty("clientScale",scale);display.save();display.respawn();sendSettingMessage(context,display,"clientScale",scale);}return SINGLE_SUCCESS;
+                        })))
                         .executes(context -> {
                             Util.sendErrMsg(context.getSource().getSender(), "Please specify an option");
                             return SINGLE_SUCCESS;
@@ -63,6 +68,15 @@ public final class DisplaySettingsCommand {
                     sendSettingMessage(context, display, name, value);
                     return SINGLE_SUCCESS;
                 }));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> codecSetting() {
+        var root=Commands.literal("clientCodec");
+        for(String codec:new String[]{"auto","rgb","h264"})root.then(Commands.literal(codec).executes(context->{
+            IBoilerDisplay display=CommandContextUtil.display(context,plugin);
+            if(display!=null){display.settings().addProperty("clientCodec",codec);display.save();display.respawn();sendSettingMessage(context,display,"clientCodec",codec);}return SINGLE_SUCCESS;
+        }));
+        return root;
     }
 
     private LiteralArgumentBuilder<CommandSourceStack> integerSetting(String name, String argumentName, boolean respawn) {

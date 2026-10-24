@@ -38,6 +38,8 @@ public final class SourceSession implements AutoCloseable {
     private volatile SourceType sourceType;
     private volatile String status = "";
     private boolean closed;
+    private boolean overlay;
+    private boolean requestedRenderPause;
 
     public SourceSession(BoilerPlugin plugin, IBoilerDisplay display, Runnable changed, BiConsumer<String, JsonObject> saved) {
         this.plugin = plugin; this.display = display; this.changed = changed; this.saved = saved;
@@ -48,6 +50,22 @@ public final class SourceSession implements AutoCloseable {
     public SourceType sourceType() { return sourceType; }
     public String status() { return status; }
     public IBoilerSource source() { return source; }
+    public String sourceName() { return name; }
+    public JsonObject sourceData() { return data.deepCopy(); }
+    /** Temporarily restores local rendering without stopping the hosted source. */
+    public void overlay(boolean enabled) {
+        lock.lock();
+        try {
+            overlay = enabled;
+            if (source instanceof net.somewhatcity.boiler.core.sources.CloneSource clone) clone.overlay(enabled);
+            display.renderPaused(enabled ? false : requestedRenderPause);
+        } finally { lock.unlock(); }
+    }
+    public java.util.Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() {
+        lock.lock();
+        try { return source == null ? java.util.Set.of() : java.util.Set.copyOf(source.remoteActions()); }
+        finally { lock.unlock(); }
+    }
 
     /** Called on the server thread; even redirects from a child remain within this session. */
     public void source(String next, JsonObject parameters) {
@@ -129,6 +147,10 @@ public final class SourceSession implements AutoCloseable {
                             saved.accept(name, data.deepCopy());
                         }
                         case "save" -> saved.accept(name, data.deepCopy());
+                        case "renderPaused" -> {
+                            requestedRenderPause = (boolean) args[0];
+                            display.renderPaused(overlay ? false : requestedRenderPause);
+                        }
                         default -> {
                             try { method.invoke(display, args); }
                             catch (ReflectiveOperationException e) { throw new IllegalStateException(e); }
@@ -169,6 +191,7 @@ public final class SourceSession implements AutoCloseable {
             raster.clear();
         } finally { lock.unlock(); }
         display.renderPaused(false);
+        requestedRenderPause = false;
         display.viewport(new Rectangle(viewport));
     }
 

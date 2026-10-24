@@ -13,13 +13,15 @@ public enum DisplaySetting {
     GLOWING(Group.PICTURE, "glowing", "Leuchtende Rahmen", "Lässt die Kartenrahmen unabhängig vom Umgebungslicht leuchten.", Kind.TOGGLE, 0, 1, true),
     ITEM_ROTATION(Group.PICTURE, "itemRotation", "Kartendrehung", "Dreht die Karten innerhalb ihrer Rahmen. Acht Stufen von 0 bis 7.", Kind.INTEGER, 0, 1, true),
     DIRECTION(Group.PICTURE, "visualDirection", "Blickrichtung", "Bestimmt die sichtbare Ausrichtung des Displays: oben, unten oder eine Himmelsrichtung.", Kind.DIRECTION, 0, 1, true),
-    YAW(Group.PICTURE, "yaw", "Drehung horizontal", "Horizontaler Drehwinkel des Displays in Grad. Präzise Werte mit Springen eingeben.", Kind.ANGLE, 0, 5, true),
-    PITCH(Group.PICTURE, "pitch", "Drehung vertikal", "Vertikaler Drehwinkel des Displays in Grad. Präzise Werte mit Springen eingeben.", Kind.ANGLE, 0, 5, true),
+    YAW(Group.PICTURE, "yaw", "Drehung horizontal", "Horizontaler Drehwinkel des Displays in Grad. Präzise Werte mit OK eingeben.", Kind.ANGLE, 0, 5, true),
+    PITCH(Group.PICTURE, "pitch", "Drehung vertikal", "Vertikaler Drehwinkel des Displays in Grad. Präzise Werte mit OK eingeben.", Kind.ANGLE, 0, 5, true),
     BUFFER(Group.PERFORMANCE, "buffer", "Bildpuffer", "Nutzt den MapEngine-Bildpuffer für die Übertragung der Displaybilder.", Kind.TOGGLE, 0, 1, false),
     BUNDLE(Group.PERFORMANCE, "bundle", "Paketbündelung", "Bündelt MapEngine-Pakete für die Übertragung an die Spieler.", Kind.TOGGLE, 0, 1, false),
     RENDER_PERIOD(Group.PERFORMANCE, "renderPeriod", "Renderintervall", "Zeit zwischen zwei Bildern in Millisekunden. Kleinere Werte liefern mehr Bilder und benötigen mehr Rechenleistung.", Kind.INTEGER, 1, 5, false),
     VIEW_DISTANCE(Group.PERFORMANCE, "viewDistance", "Sichtweite", "Entfernung in Blöcken, bis zu der Spieler das Display empfangen.", Kind.INTEGER, 1, 5, false),
-    SOUND_DISTANCE(Group.AUDIO, "soundDistance", "Tonreichweite", "Reichweite der Display-Lautsprecher in Blöcken. Gilt beim nächsten Start einer Audioquelle.", Kind.INTEGER, 1, 5, false);
+    SOUND_DISTANCE(Group.AUDIO, "soundDistance", "Tonreichweite", "Reichweite der Display-Lautsprecher in Blöcken. Gilt beim nächsten Start einer Audioquelle.", Kind.INTEGER, 1, 5, false),
+    VOLUME(Group.AUDIO, "volume", "Lautstärke", "Lautstärke des serverseitigen Display-Tons von 0 bis 100 Prozent.", Kind.INTEGER, 0, 5, false),
+    MUTED(Group.AUDIO, "muted", "Stumm", "Schaltet den serverseitigen Display-Ton stumm, ohne die gespeicherte Lautstärke zu verändern.", Kind.TOGGLE, 0, 1, false);
 
     public enum Group {
         PICTURE("Bild", "picture"), PERFORMANCE("Leistung", "settings"), AUDIO("Ton", "audio");
@@ -50,10 +52,10 @@ public enum DisplaySetting {
         }
         if (settings.has(key)) return settings.get(key).getAsString();
         return switch (this) {
-            case BUFFER, DITHER, GLOWING, BUNDLE -> "false";
+            case BUFFER, DITHER, GLOWING, BUNDLE, MUTED -> "false";
             case RENDER_PERIOD -> "20";
             case VIEW_DISTANCE -> Integer.toString(BoilerConfig.viewDistance);
-            case SOUND_DISTANCE -> "100";
+            case SOUND_DISTANCE, VOLUME -> "100";
             case DIRECTION -> display.facing().name();
             default -> "0";
         };
@@ -65,6 +67,7 @@ public enum DisplaySetting {
         else if (kind == Kind.DIRECTION && DIRECTIONS.contains(raw)) formatted = DIRECTION_LABELS.get(DIRECTIONS.indexOf(raw));
         else if (kind == Kind.ANGLE) formatted = format(Float.parseFloat(raw)) + "°";
         else if (this == RENDER_PERIOD) formatted += " ms";
+        else if (this == VOLUME) formatted += " %";
         else if (this == VIEW_DISTANCE || this == SOUND_DISTANCE) formatted += " Bl.";
         return new Value(this, formatted, kind == Kind.TOGGLE && Boolean.parseBoolean(raw));
     }
@@ -76,7 +79,7 @@ public enum DisplaySetting {
             case DIRECTION -> apply(display, DIRECTIONS.get(Math.floorMod(DIRECTIONS.indexOf(raw) + delta, DIRECTIONS.size())));
             case INTEGER -> {
                 long value = Long.parseLong(raw) + (long) delta * step;
-                apply(display, Long.toString(Math.max(minimum, Math.min(this == ITEM_ROTATION ? 7 : Integer.MAX_VALUE, value))));
+                apply(display, Long.toString(Math.max(minimum, Math.min(this == ITEM_ROTATION ? 7 : this == VOLUME ? 100 : Integer.MAX_VALUE, value))));
             }
             case ANGLE -> apply(display, format(Float.parseFloat(raw) + delta * step));
         }
@@ -92,7 +95,7 @@ public enum DisplaySetting {
             }
             case INTEGER -> {
                 int value = Integer.parseInt(trimmed);
-                if (value < minimum || this == ITEM_ROTATION && value > 7) throw new IllegalArgumentException("Wert außerhalb des gültigen Bereichs");
+                if (value < minimum || this == ITEM_ROTATION && value > 7 || this == VOLUME && value > 100) throw new IllegalArgumentException("Wert außerhalb des gültigen Bereichs");
                 settings.addProperty(key, value);
             }
             case DIRECTION -> {

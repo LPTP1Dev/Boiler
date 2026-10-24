@@ -71,7 +71,8 @@ public final class SmartTvMenu implements IBoilerSource {
         boolean large = width >= 384 && height >= 256 || width >= 256 && height >= 384;
         if (large) {
             float scale = Math.max(.5f, Math.min(width / 768f, height / 512f));
-            return new Layout(Math.max(3, Math.min(12, (int) ((width - 88 * scale) / (84 * scale)))), 1, width, height);
+            // At 1x text, an app needs enough real pixels for its name as well as its icon.
+            return new Layout(Math.max(3, Math.min(12, (int) ((width - 88 * scale) / Math.max(64,84 * scale)))), 1, width, height);
         }
         return new Layout(Math.max(1, Math.min(4, width / 120)), Math.max(1, Math.min(5, (height - 54) / 28)), width, height);
     }
@@ -85,8 +86,7 @@ public final class SmartTvMenu implements IBoilerSource {
                 frame = new BufferedImage(viewport.width, viewport.height, BufferedImage.TYPE_INT_ARGB);
             Graphics2D g = frame.createGraphics();
             try {
-                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                pixels(g);
                 Layout layout = layout(viewport.width, viewport.height);
                 if (layout.large()) home(g, layout, current); else compact(g, layout, current);
                 if (current.settings() != null) SmartTvSettings.draw(g, viewport.width, viewport.height, current.settings(), current.message());
@@ -99,9 +99,9 @@ public final class SmartTvMenu implements IBoilerSource {
     private static void compact(Graphics2D g, Layout layout, View current) {
         int width = layout.width(), height = layout.height();
         g.setColor(new Color(13, 19, 31)); g.fillRect(0, 0, width, height);
-        font(g, Font.BOLD, 12); g.setColor(new Color(111, 215, 255)); g.drawString("Boiler SmartTV", 6, 16);
+        font(g, Font.BOLD, 12); g.setColor(new Color(111, 215, 255)); drawText(g, "Boiler SmartTV", 6, 16);
         font(g, Font.PLAIN, 9);
-        if (current.playing()) { g.setColor(WHITE); text(g, current.message(), 6, 44, width - 12); g.drawString("Sneaken: Quellenmenü", 6, height - 8); return; }
+        if (current.playing()) { g.setColor(WHITE); text(g, current.message(), 6, 44, width - 12); drawText(g, "Home: Startseite", 6, height - 8); return; }
         int page = current.selected() / layout.pageSize();
         for (int slot = 0; slot < layout.pageSize(); slot++) {
             int index = page * layout.pageSize() + slot;
@@ -112,8 +112,8 @@ public final class SmartTvMenu implements IBoilerSource {
             if (selected) { g.setColor(new Color(111, 215, 255)); g.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 6, 6); }
             g.setColor(WHITE); text(g, label(current.sources().get(index)), tile.x + 5, tile.y + tile.height / 2 + 3, tile.width - 10);
         }
-        g.setColor(MUTED); text(g, current.message().isBlank() ? "WASD · Springen: OK" : current.message(), 6, height - 18, width - 12);
-        g.drawString("<", 6, height - 6); g.drawString(page + 1 + "/" + Math.max(1, (current.sources().size() + layout.pageSize() - 1) / layout.pageSize()), width / 2 - 8, height - 6); g.drawString(">", width - 12, height - 6);
+        g.setColor(MUTED); text(g, current.message().isBlank() ? "Pfeile · OK: Öffnen" : current.message(), 6, height - 18, width - 12);
+        drawText(g, "<", 6, height - 6); drawText(g, page + 1 + "/" + Math.max(1, (current.sources().size() + layout.pageSize() - 1) / layout.pageSize()), width / 2 - 8, height - 6); drawText(g, ">", width - 12, height - 6);
     }
 
     private static void home(Graphics2D g, Layout layout, View current) {
@@ -123,7 +123,7 @@ public final class SmartTvMenu implements IBoilerSource {
         g.setColor(new Color(6, 7, 11)); g.fillRect(0, 0, Math.round(62 * s), height);
         g.setPaint(new GradientPaint(0, 0, new Color(163, 141, 253), Math.round(48 * s), Math.round(70 * s), new Color(82, 70, 170)));
         g.fillOval(Math.round(18 * s), Math.round(24 * s), Math.round(32 * s), Math.round(32 * s));
-        g.setColor(WHITE); font(g, Font.BOLD, 19 * s); g.drawString("B", Math.round(27 * s), Math.round(47 * s));
+        g.setColor(WHITE); font(g, Font.BOLD, 19 * s); drawText(g, "B", Math.round(27 * s), Math.round(47 * s));
         for (int i = 0; i < 3; i++) {
             Rectangle target = layout.sidebar(i);
             boolean active = current.focus() == Focus.SIDEBAR && current.focusIndex() == i;
@@ -146,15 +146,17 @@ public final class SmartTvMenu implements IBoilerSource {
             art.setPaint(new GradientPaint(hero.x, 0, new Color(18, 17, 28, 250), hero.x + hero.width * .8f, 0, new Color(18, 17, 28, 0))); art.fill(hero);
         } finally { art.dispose(); }
         int x = hero.x + Math.round(24 * s), y = hero.y + Math.round(32 * s);
-        g.setColor(new Color(223, 200, 236)); font(g, Font.BOLD, 15 * s); g.drawString("BOILER  /  HOME", x, y);
+        g.setColor(new Color(223, 200, 236)); font(g, Font.BOLD, 15 * s); drawText(g, "BOILER  /  HOME", x, y);
         g.setColor(WHITE); font(g, Font.BOLD, 36 * s);
-        g.drawString("Dein Bildschirm.", x, y + Math.round(46 * s)); g.drawString("Deine Welt.", x, y + Math.round(88 * s));
+        while (MinecraftText.scale(g) > 1 && textWidth(g,"Dein Bildschirm.") > hero.width - Math.round(48*s))
+            font(g,Font.BOLD,(MinecraftText.scale(g)-1)*8);
+        drawText(g, "Dein Bildschirm.", x, y + Math.round(46 * s)); drawText(g, "Deine Welt.", x, y + Math.round(88 * s));
         font(g, Font.PLAIN, 17 * s); g.setColor(new Color(221, 211, 229));
         text(g, "Streams, Bilder und mehr. Alles an einem Ort.", x, hero.y + hero.height - Math.round(22 * s), Math.round(hero.width * .7f));
         if (current.playing()) {
             g.setColor(new Color(0, 0, 0, 200)); g.fillRect(layout.left(), hero.y, layout.contentWidth(), height - hero.y);
             font(g, Font.BOLD, 24 * s); g.setColor(WHITE); text(g, current.message(), x, hero.y + hero.height / 2, hero.width - Math.round(48 * s));
-            font(g, Font.PLAIN, 18 * s); g.drawString("Sneaken: Quellenmenü", x, hero.y + hero.height / 2 + Math.round(40 * s)); return;
+            font(g, Font.PLAIN, 18 * s); drawText(g, "Home: Startseite", x, hero.y + hero.height / 2 + Math.round(40 * s)); return;
         }
         for (int index = 0; index < CATEGORIES.size(); index++) {
             Rectangle chip = layout.category(index); g.setColor(CATEGORY_COLORS[index]);
@@ -165,7 +167,7 @@ public final class SmartTvMenu implements IBoilerSource {
             text(g, CATEGORIES.get(index), chip.x + Math.round(12 * s), chip.y + chip.height / 2 + Math.round(6 * s), chip.width - Math.round(24 * s));
         }
         Rectangle first = layout.tile(0);
-        g.setColor(WHITE); font(g, Font.BOLD, 18 * s); g.drawString("Deine Apps", layout.left(), first.y - Math.round(12 * s));
+        g.setColor(WHITE); font(g, Font.BOLD, 18 * s); drawText(g, "Deine Apps", layout.left(), first.y - Math.round(12 * s));
         int page = current.selected() / layout.pageSize();
         for (int slot = 0; slot < layout.pageSize(); slot++) {
             int index = page * layout.pageSize() + slot;
@@ -177,15 +179,15 @@ public final class SmartTvMenu implements IBoilerSource {
             g.fillRoundRect(tile.x, tile.y, tile.width, tile.height, Math.round(12 * s), Math.round(12 * s));
             icon(g, icon(source), tile.x + tile.width / 4, tile.y + tile.height / 4, tile.width / 2, WHITE);
             if (active) outline(g, tile, s, WHITE);
-            g.setColor(active ? WHITE : MUTED); font(g, active ? Font.BOLD : Font.PLAIN, 14 * s);
+            g.setColor(active ? WHITE : MUTED); font(g, Font.PLAIN, 14 * s);
             text(g, label(source), tile.x, tile.y + tile.height + Math.round(20 * s), layout.contentWidth() / layout.columns() - Math.round(8 * s));
         }
         int pages = Math.max(1, (current.sources().size() + layout.pageSize() - 1) / layout.pageSize());
         g.setColor(MUTED); font(g, Font.PLAIN, 14 * s);
         String pageLabel = "‹  " + (page + 1) + " / " + pages + "  ›";
-        g.drawString(pageLabel, width - Math.round(16 * s) - g.getFontMetrics().stringWidth(pageLabel), first.y - Math.round(12 * s));
+        drawText(g, pageLabel, width - Math.round(16 * s) - textWidth(g, pageLabel), first.y - Math.round(12 * s));
         Rectangle firstRecent = layout.recent(0);
-        g.setColor(WHITE); font(g, Font.BOLD, 18 * s); g.drawString(current.recent().isEmpty() ? "Quellen entdecken" : "Zuletzt verwendet", layout.left(), firstRecent.y - Math.round(12 * s));
+        g.setColor(WHITE); font(g, Font.BOLD, 18 * s); drawText(g, current.recent().isEmpty() ? "Quellen entdecken" : "Zuletzt verwendet", layout.left(), firstRecent.y - Math.round(12 * s));
         List<String> recent = current.recent().isEmpty() ? current.sources().stream().filter(source -> !source.equals(SETTINGS)).limit(layout.recentCount()).toList() : current.recent();
         for (int index = 0; index < Math.min(recent.size(), layout.recentCount()); index++) {
             String source = recent.get(index); Rectangle card = layout.recent(index); Color color = color(source);
@@ -198,11 +200,11 @@ public final class SmartTvMenu implements IBoilerSource {
             if (current.focus() == Focus.RECENT && current.focusIndex() == index) outline(g, card, s, WHITE);
         }
         g.setColor(MUTED); font(g, Font.PLAIN, 14 * s);
-        text(g, current.message().isBlank() ? "WASD: Navigation   Springen: Öffnen   Sneaken: Zurück" : current.message(), layout.left(), height - Math.round(10 * s), layout.contentWidth());
+        text(g, current.message().isBlank() ? "Pfeile: Navigation   OK: Öffnen   Home: Startseite" : current.message(), layout.left(), height - Math.round(10 * s), layout.contentWidth());
     }
 
     private static void outline(Graphics2D g, Rectangle rectangle, float scale, Color color) {
-        g.setColor(color); g.setStroke(new BasicStroke(Math.max(1, 2 * scale)));
+        g.setColor(color); g.setStroke(new BasicStroke(Math.max(1, Math.round(2 * scale))));
         g.drawRoundRect(rectangle.x - 1, rectangle.y - 1, rectangle.width + 2, rectangle.height + 2, Math.round(12 * scale), Math.round(12 * scale));
     }
 }

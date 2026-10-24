@@ -30,8 +30,8 @@ public final class SmartTvSettings {
             DisplaySetting.Group group = DisplaySetting.values()[selected].group;
             return Arrays.stream(DisplaySetting.values()).filter(option -> option.group == group).toList();
         }
-        public int rowHeight() { return Math.max(20, px(48)); }
-        public int rows() { return Math.max(1, (panel().height - px(100)) / rowHeight()); }
+        public int rowHeight() { return Math.max(width < 360 ? 34 : 24, px(48)); }
+        public int rows() { return Math.max(1, (panel().height - px(70) - Math.max(32,px(44))) / rowHeight()); }
         private int start() { return options().indexOf(DisplaySetting.values()[selected]) / rows() * rows(); }
         public Rectangle row(int optionIndex) {
             if (DisplaySetting.values()[optionIndex].group != DisplaySetting.values()[selected].group) return new Rectangle();
@@ -56,12 +56,13 @@ public final class SmartTvSettings {
     public static void draw(Graphics2D graphics, int width, int height, View view, String message) {
         Graphics2D g = (Graphics2D) graphics.create();
         try {
+            pixels(g);
             g.setColor(new Color(0, 0, 0, 155)); g.fillRect(0, 0, width, height);
             Layout layout = new Layout(width, height, view.selected());
             float s = layout.scale();
             Rectangle rail = layout.rail(), panel = layout.panel(), help = layout.help();
-            g.setColor(new Color(83, 116, 163, 245)); g.fillRoundRect(rail.x, rail.y, rail.width, rail.height, Math.round(14 * s), Math.round(14 * s));
-            g.setColor(new Color(72, 103, 150, 248)); g.fillRoundRect(panel.x, panel.y, panel.width, panel.height, Math.round(14 * s), Math.round(14 * s));
+            g.setColor(new Color(66, 91, 132)); g.fillRoundRect(rail.x, rail.y, rail.width, rail.height, Math.round(14 * s), Math.round(14 * s));
+            g.setColor(new Color(57, 80, 119)); g.fillRoundRect(panel.x, panel.y, panel.width, panel.height, Math.round(14 * s), Math.round(14 * s));
             DisplaySetting selected = DisplaySetting.values()[view.selected()];
             for (DisplaySetting.Group group : DisplaySetting.Group.values()) {
                 Rectangle target = layout.category(group.ordinal());
@@ -82,12 +83,13 @@ public final class SmartTvSettings {
                 boolean active = value.option() == selected;
                 if (active) { g.setColor(new Color(225, 245, 255)); g.fillRoundRect(row.x, row.y, row.width, row.height, Math.round(7 * s), Math.round(7 * s)); }
                 g.setColor(active ? new Color(37, 67, 100) : WHITE);
-                font(g, active ? Font.BOLD : Font.PLAIN, 20 * s);
+                font(g, Font.PLAIN, 20 * s);
                 int valueWidth = Math.round((value.option().kind == DisplaySetting.Kind.TOGGLE ? 66 : 112) * s);
-                text(g, value.option().label, row.x + Math.round(12 * s), row.y + row.height / 2 + Math.round(7 * s), row.width - valueWidth - Math.round(20 * s));
+                boolean stacked = width < 360;
+                text(g, value.option().label, row.x + Math.round(12 * s), stacked ? row.y + 11 : row.y + row.height / 2 + Math.round(7 * s), stacked ? row.width - 10 : row.width - valueWidth - Math.round(20 * s));
                 if (value.option().kind == DisplaySetting.Kind.TOGGLE) {
                     int toggleWidth = Math.round(48 * s), toggleHeight = Math.round(26 * s);
-                    int x = row.x + row.width - toggleWidth - Math.round(10 * s), y = row.y + (row.height - toggleHeight) / 2;
+                    int x = row.x + row.width - toggleWidth - Math.round(10 * s), y = stacked ? row.y + row.height - toggleHeight - 3 : row.y + (row.height - toggleHeight) / 2;
                     g.setColor(value.enabled() ? new Color(30, 226, 171) : new Color(122, 148, 178));
                     g.fillRoundRect(x, y, toggleWidth, toggleHeight, toggleHeight, toggleHeight);
                     g.setColor(WHITE);
@@ -95,15 +97,15 @@ public final class SmartTvSettings {
                     g.fillOval(x + (value.enabled() ? toggleWidth - knob - 2 : 2), y + 2, knob, knob);
                 } else {
                     font(g, Font.PLAIN, 18 * s);
-                    int baseline = row.y + row.height / 2 + Math.round(6 * s);
-                    g.drawString("‹", row.x + row.width - Math.round(108 * s), baseline);
-                    g.drawString("›", row.x + row.width - Math.round(20 * s), baseline);
-                    int valueX = row.x + row.width - Math.round(86 * s);
-                    text(g, value.text(), valueX, baseline, Math.round(58 * s));
+                    int baseline = stacked ? row.y + row.height - 5 : row.y + row.height / 2 + Math.round(6 * s);
+                    drawText(g, "‹", stacked ? row.x + 5 : row.x + row.width - Math.round(108 * s), baseline);
+                    drawText(g, "›", row.x + row.width - Math.round(20 * s), baseline);
+                    int valueX = stacked ? row.x + 15 : row.x + row.width - Math.round(86 * s);
+                    text(g, value.text(), valueX, baseline, stacked ? row.width - 35 : Math.max(30,Math.round(58 * s)));
                 }
             }
             if (width >= 360) {
-                g.setColor(new Color(42, 65, 104, 248)); g.fillRoundRect(help.x, help.y, help.width, help.height, Math.round(14 * s), Math.round(14 * s));
+                g.setColor(new Color(35, 52, 83)); g.fillRoundRect(help.x, help.y, help.width, help.height, Math.round(14 * s), Math.round(14 * s));
                 g.setColor(WHITE); font(g, Font.BOLD, 22 * s);
                 lines(g, selected.label, help.x + Math.round(18 * s), help.y + Math.round(36 * s), help.width - Math.round(36 * s), 2, Math.round(26 * s));
                 font(g, Font.PLAIN, 18 * s);
@@ -113,7 +115,7 @@ public final class SmartTvSettings {
             }
             g.setColor(new Color(217, 233, 253)); font(g, Font.PLAIN, 16 * s);
             text(g, message.isBlank() ? "W/S: Auswahl  A/D: Ändern" : message, panel.x + Math.round(14 * s), panel.y + panel.height - Math.round(30 * s), panel.width - Math.round(28 * s));
-            text(g, "Springen: OK · Sneaken: Zurück", panel.x + Math.round(14 * s), panel.y + panel.height - Math.round(10 * s), panel.width - Math.round(28 * s));
+            text(g, "OK: Bestätigen · Zurück: Schließen", panel.x + Math.round(14 * s), panel.y + panel.height - Math.round(10 * s), panel.width - Math.round(28 * s));
         } finally { g.dispose(); }
     }
 }

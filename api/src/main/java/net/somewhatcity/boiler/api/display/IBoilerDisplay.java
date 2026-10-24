@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Set;
 
 public interface IBoilerDisplay {
+    /** Preferred source framebuffer size; interaction coordinates still use width()/height(). */
+    default int frameWidth() { return width(); }
+    default int frameHeight() { return height(); }
 
     /**
      * @return the id of the display
@@ -144,19 +147,31 @@ public interface IBoilerDisplay {
     void respawn();
     void remove();
 
-    /**
-     *
-     * @return the url you can publish rtsp streams to. These streams will then get played back on client using the client mod
-     */
-    String rtspPublishUrl();
     Set<Player> viewers();
     List<Location> speakers();
     void addSpeaker(Location location);
     void clearSpeakers();
     void onClick(CommandSender player, int x, int y, boolean right);
+    default void onDrag(CommandSender player, int x, int y, boolean right,
+                        net.somewhatcity.boiler.api.util.DragPhase phase) {
+        IBoilerSource current = source();
+        if (current != null) current.onDrag(player, x, y, right, phase);
+    }
+    default void onCursorMove(CommandSender player, int x, int y) {
+        IBoilerSource current = source();
+        if (current != null) current.onCursorMove(player, x, y);
+    }
     void onScroll(CommandSender player, int x, int y, int delta);
     void onInput(CommandSender player, String string);
     void onKey(CommandSender player, String key);
+    default Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() {
+        IBoilerSource current = source();
+        return current == null ? Set.of() : current.remoteActions();
+    }
+    default void onRemoteAction(CommandSender sender, net.somewhatcity.boiler.api.util.RemoteAction action) {
+        IBoilerSource current = source();
+        if (current != null) current.onRemoteAction(sender, action);
+    }
     void save();
     void saveSourceData(JsonObject data);
 

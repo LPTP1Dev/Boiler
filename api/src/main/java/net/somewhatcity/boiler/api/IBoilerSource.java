@@ -77,6 +77,17 @@ public interface IBoilerSource {
     default void onClick(CommandSender sender, int x, int y, boolean right) {}
 
     /**
+     * Client-mod mouse gesture in display pixels. START is button-down, MOVE is
+     * movement while held, END is button-up (also on capture loss/disconnect).
+     * Override this to handle held buttons; no separate onClick is sent for it.
+     * The default preserves existing sources by treating START as one click.
+     */
+    default void onDrag(CommandSender sender, int x, int y, boolean right,
+                        net.somewhatcity.boiler.api.util.DragPhase phase) {
+        if (phase == net.somewhatcity.boiler.api.util.DragPhase.START) onClick(sender, x, y, right);
+    }
+
+    /**
      * called when someone scrolls while looking at the display
      * @param sender the sender that scrolled
      * @param x X position of the cursor
@@ -86,11 +97,16 @@ public interface IBoilerSource {
     default void onScroll(CommandSender sender, int x, int y, int delta) {}
 
     /**
-     * called when someone presses a key. Only WASD, space and shift work and only when in GUI mode
+     * Called for ordinary app key input, including keyboard and visible remote buttons.
+     * TV actions such as Home arrive separately through onRemoteAction.
      * @param sender
      * @param key
      */
     default void onKey(CommandSender sender, String key) {}
+
+    /** A non-blocking snapshot; unsupported TV operations must not be advertised. */
+    default Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() { return Set.of(); }
+    default void onRemoteAction(CommandSender sender, net.somewhatcity.boiler.api.util.RemoteAction action) {}
 
     /**
      * called when someone inputs a string

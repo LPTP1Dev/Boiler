@@ -22,11 +22,10 @@ public final class BoilerCommand {
 
     public static LiteralCommandNode<CommandSourceStack> create(BoilerPlugin plugin) {
         return Commands.literal("boiler")
+                .then(DialogCommand.build(plugin))
                 .then(new HelpCommand().build())
                 .then(new DisplayCommand(plugin).build())
-                .then(new RemoteCommand(plugin).build())
                 .then(new UpdateIntervalCommand(plugin).build())
-                .then(new BoilerClientCommand(plugin).build())
                 .then(new InfoCommand(plugin).build())
                 .build();
     }

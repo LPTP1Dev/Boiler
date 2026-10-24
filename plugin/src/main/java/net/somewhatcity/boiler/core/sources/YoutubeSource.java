@@ -19,7 +19,6 @@ import net.somewhatcity.boiler.api.IBoilerSource;
 import net.somewhatcity.boiler.api.display.IBoilerDisplay;
 import net.somewhatcity.boiler.api.util.CommandArgumentType;
 import net.somewhatcity.boiler.api.util.GraphicUtils;
-import net.somewhatcity.boiler.core.Util;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -74,17 +73,11 @@ public class YoutubeSource implements IBoilerSource, CancellableLoad {
                 if(json.has("url")) {
                     String url = json.get("url").getAsString();
 
-                    if(Util.isGstreamerInstalled()) {
-                        JsonObject load = new JsonObject();
-                        load.addProperty("url", url);
-                        display.source("gstreamer", load);
-                    } else {
-                        JsonObject load = new JsonObject();
-                        load.addProperty("url", url);
-                        load.addProperty("buffer", 10);
-                        load.addProperty("keepLastSourceData", true);
-                        display.source("ffmpeg-buffered", load);
-                    }
+                    JsonObject load = new JsonObject();
+                    load.addProperty("url", url);
+                    load.addProperty("buffer", 10);
+                    load.addProperty("keepLastSourceData", true);
+                    display.source("mediaplayer", load);
 
                 } else {
                     JsonObject err = new JsonObject();

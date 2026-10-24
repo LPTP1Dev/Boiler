@@ -1,12 +1,11 @@
 package net.somewhatcity.boiler.core.smarttv;
 
-import io.papermc.paper.event.player.AsyncChatEvent;
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import net.somewhatcity.boiler.core.BoilerPlugin;
 import net.somewhatcity.boiler.core.Util;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -21,7 +20,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
-/** The async chat listener only reserves text; source state is always changed on the server thread. */
+/** Player-bound dialog forms. Vanilla commands keep this compatible with Paper 1.21.6. */
 public final class SmartTvInputs implements Listener, AutoCloseable {
     private static final long TIMEOUT = java.util.concurrent.TimeUnit.SECONDS.toNanos(120);
     private static final class Pending {
@@ -30,6 +29,8 @@ public final class SmartTvInputs implements Listener, AutoCloseable {
         final Consumer<String> input;
         final Runnable cancel;
         long deadline = System.nanoTime() + TIMEOUT;
+        String token;
+        boolean visible;
         Pending(Object owner, Player player, Consumer<String> input, Runnable cancel) {
             this.owner = owner; this.player = player; this.input = input; this.cancel = cancel;
         }
@@ -47,30 +48,87 @@ public final class SmartTvInputs implements Listener, AutoCloseable {
         return pending.putIfAbsent(player.getUniqueId(), new Pending(owner, player, input, cancel)) == null;
     }
 
-    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
-    public void chat(AsyncChatEvent event) {
-        Pending capture = pending.get(event.getPlayer().getUniqueId());
-        if (capture == null) return;
-        event.setCancelled(true);
-        String text = PlainTextComponentSerializer.plainText().serialize(event.message());
+    /** A new nonce is issued for each field/retry, even when its owning session stays the same. */
+    public void show(Object owner, Player player, String title, String label, String initial, String error) {
+        Pending capture = pending.get(player.getUniqueId());
+        if (capture == null || capture.owner != owner) return;
+        capture.token = UUID.randomUUID().toString();
+        capture.deadline = System.nanoTime() + TIMEOUT;
+        String definition = dialogDefinition(title, label, initial, error, capture.token).toString();
+        try {
+            if (!plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), "minecraft:dialog show " + playerTarget(player) + " " + definition))
+                throw new IllegalStateException("Dialog command failed");
+            capture.visible = true;
+        } catch (RuntimeException e) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Opening SmartTV dialog", e);
+            cancelPlayer(player);
+            Util.sendErrMsg(player, "Der Eingabedialog konnte nicht geöffnet werden.");
+        }
+    }
+
+    static JsonObject dialogDefinition(String title, String label, String initial, String error, String token) {
+        JsonObject dialog = new JsonObject();
+        dialog.addProperty("type", "minecraft:confirmation");
+        dialog.addProperty("title", title);
+        dialog.addProperty("pause", false);
+        dialog.addProperty("can_close_with_escape", true);
+        dialog.addProperty("after_action", "wait_for_response");
+        JsonArray body = new JsonArray();
+        JsonObject description = new JsonObject(); description.addProperty("type", "minecraft:plain_message");
+        description.addProperty("contents", error.isBlank() ? "Nur du kannst diese Eingabe bestätigen. Escape oder Abbrechen schließt den Dialog." : error);
+        body.add(description); dialog.add("body", body);
+        JsonObject input = new JsonObject(); input.addProperty("type", "minecraft:text"); input.addProperty("key", "value");
+        input.addProperty("label", label); input.addProperty("initial", initial); input.addProperty("max_length", 4096); input.addProperty("width", 300);
+        JsonArray fields = new JsonArray(); fields.add(input); dialog.add("inputs", fields);
+        dialog.add("yes", button("Übernehmen", "minecraft:dynamic/run_command", "template", "boiler dialog " + token + " submit \"$(value)\""));
+        dialog.add("no", button("Abbrechen", "minecraft:run_command", "command", "boiler dialog " + token + " cancel"));
+        return dialog;
+    }
+    private static JsonObject button(String label, String type, String key, String command) {
+        JsonObject button = new JsonObject(); button.addProperty("label", label); button.addProperty("width", 150);
+        JsonObject action = new JsonObject(); action.addProperty("type", type); action.addProperty(key, command); button.add("action", action);
+        return button;
+    }
+
+    /** Executed by a dialog button as that player; callbacks still pass through the server thread. */
+    public void respond(Player player, String token, String value, boolean cancelled) {
+        Pending capture = pending.get(player.getUniqueId());
+        if (capture == null || !token.equals(capture.token)) return;
         plugin.onMain(() -> {
-            if (pending.get(capture.player.getUniqueId()) != capture) return;
-            if (!capture.player.isOnline() || System.nanoTime() >= capture.deadline) {
-                cancelPlayer(capture.player);
-                return;
-            }
+            if (pending.get(player.getUniqueId()) != capture || !token.equals(capture.token)) return;
+            if (!player.isOnline() || System.nanoTime() >= capture.deadline || cancelled) { cancelPlayer(player); return; }
+            closeDialog(capture);
             capture.deadline = System.nanoTime() + TIMEOUT;
-            capture.input.accept(text);
+            capture.input.accept(value);
         });
+    }
+
+    private void closeDialog(Pending capture) {
+        capture.token = null;
+        if (!capture.visible) return;
+        capture.visible = false;
+        if (!capture.player.isOnline()) return;
+        try {
+            if (!plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), "minecraft:dialog clear " + playerTarget(capture.player)))
+                throw new IllegalStateException("Dialog clear command failed");
+        } catch (RuntimeException e) {
+            // Releasing ownership must succeed even if the client dialog could not be cleared.
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Closing SmartTV dialog", e);
+        }
+    }
+
+    static String playerTarget(Player player) {
+        // A bare UUID may be parsed as an entity target by newer player-only command arguments.
+        return "@a[name=" + new com.google.gson.JsonPrimitive(player.getName()) + ",limit=1]";
     }
 
     public void cancelPlayer(Player player) {
         Pending capture = pending.remove(player.getUniqueId());
-        if (capture != null) capture.cancel.run();
+        if (capture != null) { closeDialog(capture); capture.cancel.run(); }
     }
 
     public void release(Object owner) {
-        pending.entrySet().removeIf(entry -> entry.getValue().owner == owner);
+        for (Pending capture : pending.values()) if (capture.owner == owner && pending.remove(capture.player.getUniqueId(), capture)) closeDialog(capture);
     }
 
     public void touch(Object owner, Player player) {
@@ -81,6 +139,7 @@ public final class SmartTvInputs implements Listener, AutoCloseable {
     void expire(long now) {
         for (Pending capture : pending.values()) if (now >= capture.deadline) {
             if (!pending.remove(capture.player.getUniqueId(), capture)) continue;
+            closeDialog(capture);
             capture.cancel.run();
             Util.sendMsg(capture.player, "SmartTV-Eingabe wegen Zeitüberschreitung abgebrochen.");
         }

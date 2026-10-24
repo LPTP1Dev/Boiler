@@ -29,12 +29,17 @@ public final class RasterRenderer {
     }
 
     public BufferedImage drawImage(IBoilerSource source, int width, int height) {
-        if (image == null || image.getWidth() != width || image.getHeight() != height) {
-            image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        return drawImage(source,width,height,width,height);
+    }
+
+    public BufferedImage drawImage(IBoilerSource source,int width,int height,int outputWidth,int outputHeight) {
+        if (image == null || image.getWidth() != outputWidth || image.getHeight() != outputHeight) {
+            image = new BufferedImage(outputWidth, outputHeight, BufferedImage.TYPE_INT_ARGB);
             pixels = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
         } else Arrays.fill(pixels, 0);
         Graphics2D graphics = image.createGraphics();
         try {
+            graphics.scale(outputWidth/(double)width,outputHeight/(double)height);
             source.draw(graphics, new Rectangle(0, 0, width, height));
         } finally { graphics.dispose(); }
         return image;

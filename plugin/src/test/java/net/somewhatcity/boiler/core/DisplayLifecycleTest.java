@@ -113,6 +113,153 @@ class DisplayLifecycleTest {
         return player;
     }
 
+    @Test void modAndVanillaViewersUseSeparateOutputsAndDisconnectRestoresMaps() throws Exception {
+        var plugin=BoilerPlugin.getPlugin();
+        var streaming=mock(net.somewhatcity.boiler.core.client.ClientStreamServer.class);
+        when(plugin.streamServer()).thenReturn(streaming);
+        when(map.width()).thenReturn(1);when(map.height()).thenReturn(1);
+        when(map.box()).thenReturn(new org.bukkit.util.BoundingBox(0,0,0,1,1,0));
+        when(world.getUID()).thenReturn(UUID.randomUUID());when(world.getKey()).thenReturn(NamespacedKey.minecraft("overworld"));
+        Player mod=mock(Player.class),vanilla=mock(Player.class);
+        for(Player player:java.util.List.of(mod,vanilla)) {
+            when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+            when(player.getLocation()).thenReturn(new Location(world,0,0,-2));
+        }
+        bukkit.when(Bukkit::getOnlinePlayers).thenReturn(java.util.List.of(mod,vanilla));
+        when(streaming.available(mod)).thenReturn(true);
+        when(streaming.canAttach(eq(mod),anyInt(),anyInt(),anyInt())).thenReturn(true);
+        when(streaming.attach(eq(mod),any())).thenReturn(true);
+        when(streaming.subscribed(eq(mod),any())).thenReturn(true);
+        display.settings().addProperty("clientScale",2);
+        display.source("plain",new JsonObject());await(()->display.source() instanceof PlainSource);
+        display.tick();display.render();
+        verify(map,never()).spawn(mod);verify(map).spawn(vanilla);
+        assertEquals(256,display.frameWidth());assertEquals(256,display.frameHeight());
+        await(()->!mockingDetails(streaming).getInvocations().stream().filter(i->i.getMethod().getName().equals("publish")).toList().isEmpty());
+        verify(space.ctx(),atLeastOnce()).receivers(argThat(players->players.contains(vanilla)&&!players.contains(mod)));
+        when(streaming.available(mod)).thenReturn(false);display.tick();
+        verify(streaming).detach(mod,display.id());verify(map).spawn(mod);
+        assertEquals(128,display.frameWidth());
+    }
+
+    @Test void smartTvWithPersistedSouthZeroRotationUsesTheModOutput() throws Exception {
+        display.remove();
+        var plugin=BoilerPlugin.getPlugin();
+        var streaming=mock(net.somewhatcity.boiler.core.client.ClientStreamServer.class);
+        when(plugin.streamServer()).thenReturn(streaming);
+        when(map.width()).thenReturn(7);when(map.height()).thenReturn(4);
+        when(map.pixelWidth()).thenReturn(896);when(map.pixelHeight()).thenReturn(512);
+        when(map.box()).thenReturn(new org.bukkit.util.BoundingBox(-18,64,-11,-11,68,-11));
+        when(world.getUID()).thenReturn(UUID.randomUUID());when(world.getKey()).thenReturn(NamespacedKey.minecraft("overworld"));
+        display=new ImplBoilerDisplay(7,new Location(world,-18,64,-11),new Location(world,-12,67,-11),BlockFace.SOUTH);
+        display.persistent(false);
+        Player mod=mock(Player.class);when(mod.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(mod.getLocation()).thenReturn(new Location(world,-15,65,-9));
+        bukkit.when(Bukkit::getOnlinePlayers).thenReturn(java.util.List.of(mod));
+        when(streaming.available(mod)).thenReturn(true);when(streaming.canAttach(eq(mod),anyInt(),anyInt(),anyInt())).thenReturn(true);
+        when(streaming.attach(eq(mod),any())).thenReturn(true);when(streaming.subscribed(eq(mod),any())).thenReturn(true);
+        var sources=plugin.sourceManager();
+        doReturn(net.somewhatcity.boiler.core.sources.SmartTVSource.class).when(sources).source("smarttv");
+        JsonObject rotation=new JsonObject();rotation.addProperty("yaw",0);rotation.addProperty("pitch",0);
+        display.settings().add("rotation",rotation);display.settings().addProperty("visualDirection","SOUTH");
+        display.source("smarttv",new JsonObject());await(()->display.source() instanceof net.somewhatcity.boiler.core.sources.SmartTVSource);
+        display.tick();display.render();
+        await(()->mockingDetails(streaming).getInvocations().stream().anyMatch(i->i.getMethod().getName().equals("publish")));
+        verify(streaming).attach(eq(mod),any());verify(map,never()).spawn(mod);
+        org.mockito.ArgumentCaptor<net.somewhatcity.boiler.stream.StreamProtocol.Frame> frame=org.mockito.ArgumentCaptor.forClass(net.somewhatcity.boiler.stream.StreamProtocol.Frame.class);
+        verify(streaming,atLeastOnce()).publish(any(),frame.capture());
+        assertEquals(896,frame.getValue().width());assertEquals(512,frame.getValue().height());
+        int[] pixels=new int[896*512];net.somewhatcity.boiler.stream.StreamProtocol.applyRgb(frame.getAllValues().getFirst(),pixels);
+        assertTrue(java.util.Arrays.stream(pixels).distinct().count()>16,"SmartTV must produce the composed color menu");
+        rotation.addProperty("yaw",45);display.tick();
+        verify(streaming).detach(mod,7);verify(map).spawn(mod);
+    }
+
+    @Test void nettyInputsOpenAndCloseDialogsOnlyOnTheServerThread() throws Exception {
+        BoilerPlugin plugin = BoilerPlugin.getPlugin();
+        org.bukkit.Server server = plugin.getServer();
+        var scheduler = mock(org.bukkit.scheduler.BukkitScheduler.class);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(scheduler.runTaskTimer(eq(plugin),any(Runnable.class),anyLong(),anyLong())).thenReturn(mock(org.bukkit.scheduler.BukkitTask.class));
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        when(server.dispatchCommand(any(),anyString())).thenAnswer(invocation -> {
+            assertSame(testThread,Thread.currentThread(),"Dialog command reached Netty");
+            commands.add(invocation.getArgument(1)); return true;
+        });
+        var inputs = new net.somewhatcity.boiler.core.smarttv.SmartTvInputs(plugin);
+        when(plugin.smartTvInputs()).thenReturn(inputs);
+        ISourceManager sources = plugin.sourceManager();
+        doReturn(DialogInputSource.class).when(sources).source("dialog-test");
+        display.source("dialog-test",new JsonObject());
+        await(() -> display.source() instanceof DialogInputSource);
+        DialogInputSource source = (DialogInputSource) display.source();
+        Player player = mock(Player.class);
+        when(player.getName()).thenReturn("DialogTester");
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID()); when(player.isOnline()).thenReturn(true);
+        try {
+            Thread netty = new Thread(() -> {
+                try (MockedStatic<Bukkit> workerBukkit = mockStatic(Bukkit.class)) {
+                    workerBukkit.when(Bukkit::isPrimaryThread).thenReturn(false);
+                    display.onClick(player,5,5,false);
+                    display.onKey(player,"SHIFT");
+                    display.onInput(player,"text");
+                    display.onScroll(player,5,5,1);
+                    display.onRemoteAction(player,net.somewhatcity.boiler.api.util.RemoteAction.HOME);
+                }
+            },"Netty-test");
+            netty.start(); netty.join(2000); assertFalse(netty.isAlive());
+            assertTrue(source.events.isEmpty()); assertTrue(commands.isEmpty());
+            await(() -> source.events.size() == 5);
+            assertEquals(java.util.List.of("click","SHIFT","text","scroll","HOME"),source.events);
+            assertEquals(2,commands.size());
+            assertTrue(commands.get(0).startsWith("minecraft:dialog show "));
+            assertTrue(commands.get(1).startsWith("minecraft:dialog clear "));
+        } finally { inputs.close(); }
+    }
+
+    @Test void queuedNettyInputIsDiscardedAfterSourceChangeOrRemoval() throws Exception {
+        ISourceManager sources = BoilerPlugin.getPlugin().sourceManager();
+        doReturn(DialogInputSource.class).when(sources).source("dialog-test");
+        display.source("dialog-test",new JsonObject()); await(() -> display.source() instanceof DialogInputSource);
+        DialogInputSource old = (DialogInputSource) display.source();
+        enqueueNettyKey();
+        display.source("plain",new JsonObject()); await(() -> display.source() instanceof PlainSource);
+        assertTrue(old.events.isEmpty());
+        display.source("dialog-test",new JsonObject()); await(() -> display.source() instanceof DialogInputSource);
+        DialogInputSource removed = (DialogInputSource) display.source();
+        enqueueNettyKey(); display.remove(); await(() -> main.isEmpty());
+        assertTrue(removed.events.isEmpty());
+    }
+
+    private void enqueueNettyKey() throws Exception {
+        Thread netty = new Thread(() -> {
+            try (MockedStatic<Bukkit> workerBukkit = mockStatic(Bukkit.class)) {
+                workerBukkit.when(Bukkit::isPrimaryThread).thenReturn(false);
+                display.onKey(mock(Player.class),"stale");
+            }
+        });
+        netty.start(); netty.join(2000); assertFalse(netty.isAlive());
+    }
+
+    public static class DialogInputSource implements IBoilerSource {
+        final java.util.List<String> events = new java.util.ArrayList<>();
+        @Override public void load(IBoilerDisplay display,JsonObject data) {}
+        @Override public void unload() {}
+        @Override public java.util.Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() { return java.util.Set.of(net.somewhatcity.boiler.api.util.RemoteAction.HOME); }
+        @Override public void onClick(org.bukkit.command.CommandSender sender,int x,int y,boolean right) {
+            events.add("click");
+            var inputs = BoilerPlugin.getPlugin().smartTvInputs();
+            inputs.request(this,(Player)sender,input -> {},() -> {});
+            inputs.show(this,(Player)sender,"Test","Text","","");
+        }
+        @Override public void onKey(org.bukkit.command.CommandSender sender,String key) { events.add(key); }
+        @Override public void onInput(org.bukkit.command.CommandSender sender,String value) { events.add(value); }
+        @Override public void onScroll(org.bukkit.command.CommandSender sender,int x,int y,int delta) { events.add("scroll"); }
+        @Override public void onRemoteAction(org.bukkit.command.CommandSender sender,net.somewhatcity.boiler.api.util.RemoteAction action) {
+            events.add(action.name()); BoilerPlugin.getPlugin().smartTvInputs().cancelPlayer((Player)sender);
+        }
+    }
+
     @Test void skipsDrawAndFlushWithoutEligibleRecipients() throws Exception {
         display.source("plain", new JsonObject());
         await(() -> display.source() instanceof PlainSource);

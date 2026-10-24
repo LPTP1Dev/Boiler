@@ -13,7 +13,6 @@ package net.somewhatcity.boiler.core.sources;
 import com.google.gson.JsonObject;
 import net.somewhatcity.boiler.core.BoilerPlugin;
 import com.google.gson.JsonParser;
-import de.maxhenkel.voicechat.api.audiochannel.AudioPlayer;
 import net.somewhatcity.boiler.api.CreateArgument;
 import net.somewhatcity.boiler.api.CreateCommandArguments;
 import net.somewhatcity.boiler.api.IBoilerSource;
@@ -22,16 +21,8 @@ import net.somewhatcity.boiler.api.util.CommandArgumentType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import org.bytedeco.ffmpeg.global.avutil;
 
-import javax.sound.sampled.AudioFormat;
-import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.util.ArrayDeque;
-import java.util.Queue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @CreateCommandArguments(arguments = {
         @CreateArgument(name = "url", type = CommandArgumentType.GREEDY_STRING)
@@ -61,7 +52,8 @@ public class TwitchSource implements IBoilerSource, CancellableLoad {
             load.addProperty("url", streamUrl);
             load.addProperty("buffer", 100);
             load.addProperty("live", true);
-            display.source("ffmpeg-buffered", load);
+            load.addProperty("keepLastSourceData", true);
+            display.source("mediaplayer", load);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

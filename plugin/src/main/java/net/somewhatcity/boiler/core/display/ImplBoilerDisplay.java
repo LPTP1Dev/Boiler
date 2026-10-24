@@ -50,6 +50,8 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
     private final BlockFace FACING;
     private final IDrawingSpace drawingSpace;
     private final RasterRenderer raster = new RasterRenderer();
+    private final RasterRenderer colorRaster = new RasterRenderer();
+    private BufferedImage mapPreview;
     private final RasterRenderer sectionRaster = new RasterRenderer();
     private final ReentrantLock renderLock = new ReentrantLock();
     private final SourceGeneration generations = new SourceGeneration();
@@ -65,6 +67,9 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
     private final List<Location> speakers = new CopyOnWriteArrayList<>();
     private final Map<UUID, Long> lastUpdates = new ConcurrentHashMap<>();
     private final Set<Player> receivers = ConcurrentHashMap.newKeySet();
+    private final Set<Player> colorReceivers = ConcurrentHashMap.newKeySet();
+    private volatile net.somewhatcity.boiler.core.client.DisplayStream colorStream;
+    private long streamGeneration = System.nanoTime();
     private volatile SourceType sourceType;
     private volatile int renderPeriod = 20;
     private final RenderLoop renderLoop;
@@ -101,6 +106,7 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
 
     @EventHandler public void onQuit(PlayerQuitEvent event) {
         receivers.remove(event.getPlayer());
+        colorReceivers.remove(event.getPlayer());
         lastUpdates.remove(event.getPlayer().getUniqueId());
     }
 
@@ -127,55 +133,105 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
             double dx = CORNER_A.getX() - viewer.x(), dy = CORNER_A.getY() - viewer.y(), dz = CORNER_A.getZ() - viewer.z();
             if (distance > 0 && dx * dx + dy * dy + dz * dz < squared) visible.add(viewer.player());
         }
-        boolean client = BoilerConfig.clientEnabled && sourceType == SourceType.CLIENT;
+        var streaming = BoilerPlugin.getPlugin().streamServer();
         for (Player player : new ArrayList<>(receivers)) {
             if (!visible.contains(player) && receivers.remove(player)) {
-                if (client) BoilerClientUtil.sendRemoveDisplay(player, this);
+                if (colorReceivers.remove(player)) { if (streaming != null) streaming.detach(player, ID); }
                 else MAP_DISPLAY.despawn(player);
             }
         }
         for (Player player : visible) {
-            if (!receivers.add(player)) continue;
-            if (client) {
-                String username = "bs_" + player.getName().replace("_", "").toLowerCase(Locale.ROOT);
-                String password = UUID.randomUUID().toString().replace("-", "");
-                BoilerPlugin.getPlugin().mediaMtxAuthServer().registerUser(username, password);
-                String stream = "rtsp://%s:%s@%s:%s/live/display_%s".formatted(username, password, BoilerConfig.rtmpHost, BoilerConfig.rtmpPort, id());
-                BoilerClientUtil.sendCreateDisplay(player, this, stream);
-            } else {
-                MAP_DISPLAY.spawn(player);
-                if (settings.has("itemRotation")) MAP_DISPLAY.itemRotation(player, settings.get("itemRotation").getAsInt());
-                if (settings.has("visualDirection")) MAP_DISPLAY.visualDirection(player, BlockFace.valueOf(settings.get("visualDirection").getAsString()));
-                if (settings.has("rotation")) MAP_DISPLAY.rotation(player, settings.getAsJsonObject("rotation").get("yaw").getAsFloat(), settings.getAsJsonObject("rotation").get("pitch").getAsFloat());
+            boolean color = supportsColor() && streaming != null && streaming.available(player)
+                    && streaming.canAttach(player,ID,width()*clientScale(),height()*clientScale());
+            if (receivers.contains(player) && (color != colorReceivers.contains(player) || color && !streaming.subscribed(player,colorStream))) {
+                if (colorReceivers.remove(player)) streaming.detach(player, ID);
+                else MAP_DISPLAY.despawn(player);
+                receivers.remove(player);
+                lastUpdates.remove(player.getUniqueId());
             }
+            if (!receivers.add(player)) continue;
+            if (color) {
+                if (colorStream == null) colorStream = createColorStream(streaming);
+                if (streaming.attach(player, colorStream)) { colorReceivers.add(player); continue; }
+            }
+            MAP_DISPLAY.spawn(player);
+            if (settings.has("itemRotation")) MAP_DISPLAY.itemRotation(player, settings.get("itemRotation").getAsInt());
+            if (settings.has("visualDirection")) MAP_DISPLAY.visualDirection(player, BlockFace.valueOf(settings.get("visualDirection").getAsString()));
+            if (settings.has("rotation")) MAP_DISPLAY.rotation(player, settings.getAsJsonObject("rotation").get("yaw").getAsFloat(), settings.getAsJsonObject("rotation").get("pitch").getAsFloat());
+        }
+        if (colorReceivers.isEmpty() && colorStream != null) {
+            renderLock.lock();
+            try { colorStream.close(); colorStream = null; ++streamGeneration; }
+            finally { renderLock.unlock(); }
         }
         updateRenderTask();
     }
 
+    private boolean supportsColor() {
+        if (source == null || sourceType == SourceType.CLIENT || (long)width()*height() > net.somewhatcity.boiler.stream.StreamProtocol.MAX_PIXELS || width()>2048 || height()>2048) return false;
+        if (!net.somewhatcity.boiler.core.client.DisplayGeometry.hasNativeRotation(settings,FACING) || settings.has("visualDirection") && !settings.get("visualDirection").getAsString().equals(FACING.name())
+                || settings.has("itemRotation") && settings.get("itemRotation").getAsInt()!=0) return false;
+        try { return source.getClass().getMethod("draw", Graphics2D.class, Rectangle.class).getDeclaringClass()!=IBoilerSource.class; }
+        catch (NoSuchMethodException e) { return false; }
+    }
+
+    private net.somewhatcity.boiler.core.client.DisplayStream createColorStream(net.somewhatcity.boiler.core.client.ClientStreamServer server) {
+        String mode=settings.has("clientCodec") ? settings.get("clientCodec").getAsString() : BoilerConfig.streamCodec;
+        var base=net.somewhatcity.boiler.core.client.DisplayGeometry.snapshot(this,++streamGeneration);
+        int scale=clientScale();
+        var metadata=new net.somewhatcity.boiler.stream.StreamProtocol.Display(base.id(),base.generation(),base.world(),width()*scale,height()*scale,base.origin(),base.right(),base.down());
+        return new net.somewhatcity.boiler.core.client.DisplayStream(metadata,mode,server,BoilerPlugin.getPlugin().runtime().encoders());
+    }
+
+    private int clientScale() {
+        int requested=settings.has("clientScale") ? settings.get("clientScale").getAsInt() : BoilerConfig.streamResolutionScale;
+        return Math.max(1,Math.min(Math.min(4,requested),Math.min(2048/Math.max(1,width()),2048/Math.max(1,height()))));
+    }
+    @Override public int frameWidth() {return colorStream!=null ? colorStream.display.width() : width();}
+    @Override public int frameHeight() {return colorStream!=null ? colorStream.display.height() : height();}
+
     private void updateRenderTask() {
-        boolean needed = !removed && !renderPaused && !receivers.isEmpty() && sourceType != SourceType.SERVER;
+        boolean needed = !removed && (!renderPaused || !colorReceivers.isEmpty()) && !receivers.isEmpty() && sourceType != SourceType.SERVER;
         renderLoop.update(needed, renderPeriod);
     }
 
     @Override public void render() {
-        if (removed || renderPaused || receivers.isEmpty() || !renderLock.tryLock()) return;
+        if (removed || renderPaused && colorReceivers.isEmpty() || receivers.isEmpty() || !renderLock.tryLock()) return;
         try {
             IBoilerSource current = source;
-            if (current == null || removed || renderPaused) return;
+            if (current == null || removed) return;
             long now = System.nanoTime();
+            var streaming = colorStream;
+            boolean colorFrame = streaming != null && !colorReceivers.isEmpty() && streaming.wantsFrame(now,BoilerConfig.streamFps);
             Set<Player> eligible = new HashSet<>();
             Set<UUID> viewerIds = new HashSet<>();
             for (Player player : receivers) viewerIds.add(player.getUniqueId());
             lastUpdates.keySet().retainAll(viewerIds);
             for (Player player : receivers) {
+                if (colorReceivers.contains(player) || renderPaused) continue;
                 int interval = BoilerPlugin.getPlugin().intervalManager().getInterval(player);
                 Long last = lastUpdates.get(player.getUniqueId());
                 if (interval <= 0 || last == null || now - last >= TimeUnit.MILLISECONDS.toNanos(interval)) eligible.add(player);
             }
-            if (eligible.isEmpty()) return;
-            drawingSpace.ctx().receivers(eligible);
-            raster.draw(current, drawingSpace, width(), height());
-            drawingSpace.flush();
+            if (eligible.isEmpty() && !colorFrame) return;
+            if (colorFrame) {
+                BufferedImage frame=colorRaster.drawImage(current,width(),height(),streaming.display.width(),streaming.display.height());
+                streaming.submit(frame);
+                if (!eligible.isEmpty()) {
+                    BufferedImage mapFrame=frame;
+                    if(frame.getWidth()!=width() || frame.getHeight()!=height()) {
+                        if(mapPreview==null)mapPreview=new BufferedImage(width(),height(),BufferedImage.TYPE_INT_ARGB);
+                        Graphics2D graphics=mapPreview.createGraphics();
+                        try {graphics.setComposite(java.awt.AlphaComposite.Src);graphics.drawImage(frame,0,0,width(),height(),null);}finally{graphics.dispose();}
+                        mapFrame=mapPreview;
+                    }
+                    drawingSpace.ctx().receivers(eligible);drawingSpace.clear();drawingSpace.image(mapFrame,0,0);drawingSpace.flush();
+                }
+            } else if (!eligible.isEmpty()) {
+                drawingSpace.ctx().receivers(eligible);
+                raster.draw(current, drawingSpace, width(), height());
+                drawingSpace.flush();
+            }
             for (Player player : eligible)
                 lastUpdates.compute(player.getUniqueId(), (id, previous) -> receivers.contains(player) ? now : null);
         } finally { renderLock.unlock(); }
@@ -195,11 +251,15 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
         if (!Bukkit.isPrimaryThread()) { main(this::respawn); return; }
         for (Player player : receivers) {
             MAP_DISPLAY.despawn(player);
-            if (BoilerConfig.clientEnabled) BoilerClientUtil.sendRemoveDisplay(player, this);
+            if (BoilerPlugin.getPlugin().streamServer()!=null) BoilerPlugin.getPlugin().streamServer().detach(player,ID);
         }
         receivers.clear();
         renderLock.lock();
-        try { lastUpdates.clear(); }
+        try {
+            lastUpdates.clear();colorReceivers.clear();
+            if(colorStream!=null) {colorStream.close();colorStream=null;}++streamGeneration;
+            colorRaster.clear();mapPreview=null;
+        }
         finally { renderLock.unlock(); }
         updateRenderTask();
     }
@@ -344,10 +404,28 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
         save();
     }
     @Override public void onClick(CommandSender sender, int x, int y, boolean right) { withSource(s -> s.onClick(sender, x, y, right)); }
+    @Override public void onDrag(CommandSender sender, int x, int y, boolean right, net.somewhatcity.boiler.api.util.DragPhase phase) { withSource(s -> s.onDrag(sender, x, y, right, phase)); }
+    @Override public void onCursorMove(CommandSender sender, int x, int y) { withSource(s -> s.onCursorMove(sender, x, y)); }
     @Override public void onScroll(CommandSender sender, int x, int y, int delta) { withSource(s -> s.onScroll(sender, x, y, delta)); }
     @Override public void onInput(CommandSender sender, String input) { withSource(s -> s.onInput(sender, input)); }
     @Override public void onKey(CommandSender sender, String key) { withSource(s -> s.onKey(sender, key)); }
+    @Override public void onRemoteAction(CommandSender sender, net.somewhatcity.boiler.api.util.RemoteAction action) {
+        withSource(s -> { if (s.remoteActions().contains(action)) s.onRemoteAction(sender, action); });
+    }
+    @Override public Set<net.somewhatcity.boiler.api.util.RemoteAction> remoteActions() {
+        renderLock.lock();
+        try { return source == null || removed ? Set.of() : Set.copyOf(source.remoteActions()); }
+        finally { renderLock.unlock(); }
+    }
     private void withSource(java.util.function.Consumer<IBoilerSource> action) {
+        // MapEngine may deliver clicks on Netty threads. Never enter a source or hold
+        // its render lock there: handlers can open dialogs and change Bukkit state.
+        if (!Bukkit.isPrimaryThread()) {
+            IBoilerSource expected = source;
+            if (expected == null || removed) return;
+            main(() -> { if (source == expected && !removed) withSource(action); });
+            return;
+        }
         renderLock.lock();
         try { if (source != null && !removed) action.accept(source); }
         finally { renderLock.unlock(); }
@@ -359,7 +437,6 @@ public class ImplBoilerDisplay implements IBoilerDisplay, Listener {
     @Override public void persistent(boolean value) { persistent = value; }
     @Override public boolean renderPaused() { return renderPaused; }
     @Override public void renderPaused(boolean value) { renderPaused = value; updateRenderTask(); }
-    @Override public String rtspPublishUrl() { return "rtsp://localhost:8554/live/display_%s".formatted(ID); }
     @Override public Set<Player> viewers() { return receivers; }
     @Override public List<Location> speakers() { return Collections.unmodifiableList(speakers); }
     @Override public void addSpeaker(Location location) { speakers.add(location); }

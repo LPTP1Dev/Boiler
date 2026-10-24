@@ -33,6 +33,7 @@ public class SvcAudioPlayer {
     private ScheduledFuture<?> playbackTask;
     private volatile long position;
     private boolean stopped;
+    private boolean suspended;
 
     public SvcAudioPlayer(IBoilerDisplay display) { this(display, false); }
     public SvcAudioPlayer(IBoilerDisplay display, boolean live) {
@@ -69,11 +70,12 @@ public class SvcAudioPlayer {
         if (API != null) write(API.getAudioConverter().bytesToShorts(samples));
     }
     private void write(short[] samples) {
-        try { audioQueue.write(samples); }
+        try { synchronized (audioQueue) { if (!suspended) audioQueue.write(samples); } }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
     public int getAudioQueueSize() { return audioQueue.size(); }
     public void clear() { audioQueue.clear(); }
+    public void suspended(boolean value) { synchronized (audioQueue) { suspended = value; if (value) audioQueue.clear(); } }
     public void stop() {
         // Wake producers before acquiring the encoder lock.
         audioQueue.close();

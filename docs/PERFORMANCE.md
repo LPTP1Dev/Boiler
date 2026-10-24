@@ -10,19 +10,27 @@ Stand: 22. Oktober 2026. Der vorhandene Checkout wurde optimiert; öffentliche A
 - Serialisierte Quellwechsel mit Generationsprüfung und höchstens einer wartenden, ersetzbaren Anforderung je Display. Verspätete HTTP-/EOF-Callbacks können neuere Quellen nicht überschreiben. Die globale Lade- und HTTP-Warteschlange ist jeweils auf 128 Aufgaben bei vier Arbeitsthreads begrenzt; bei Überlast erscheint ein Fehlerbild statt eines zusätzlichen Threads oder blockierender Arbeit auf dem Serverthread.
 - Gemeinsame FFmpeg-Zeitachse für Video und Audio, blockierende begrenzte Queues, wiederverwendbare dekodierte Bildpuffer und native Audio-Konvertierung nach 48 kHz, mono, PCM16 little endian. Dateien werden vollständig abgespielt; Video ohne Audio und Schleifenwiedergabe werden gesondert geprüft. Schmale Videos mit aufgefüllten Bildzeilen werden korrekt behandelt.
 - Primitive PCM-Ringpuffer statt einzelner `Short`-Objekte; Audioencoder entstehen bei FFmpeg nur für Medien mit Audiospur. GStreamer kopiert Pixel blockweise, vermeidet programmgesteuerte Seek-Schleifen und verwendet einen gemeinsam initialisierten Kontext. Der frühere fünfsekündige Start-Sleep samt Testplayer entfällt.
-- Streamstatus-Abfragen laufen außerhalb des Serverthreads, bündeln gleichzeitig laufende Abfragen und halten Ergebnisse 250 ms vor. HTTP-Clients werden geteilt; Requests und Verbindungsressourcen werden beim Stoppen freigegeben.
+- HTTP-Clients werden geteilt; Requests und Verbindungsressourcen werden beim Stoppen freigegeben.
 - Persistenz erzeugt JSON direkt aus dem Zustand und ersetzt Dateien atomar, soweit das Dateisystem dies unterstützt. Das Laden überschreibt keine teilweise initialisierten Displays. Nicht persistente Displays haben eigene IDs und werden ebenfalls verwaltet.
-- Disable stoppt Displays, native Quellen, Scheduler, HTTP und Prozesse, ohne gespeicherte Displays zu löschen. Die Laufzeit wartet insgesamt höchstens sechs Sekunden auf Hintergrundarbeit und meldet verbleibende Arbeit. Die tatsächlich verwendeten FFmpeg-Leseoptionen können diese Frist beeinflussen, wenn eigene Optionen Timeouts überschreiben.
+- Disable stoppt Displays, native Quellen, Scheduler, HTTP und Prozesse, ohne gespeicherte Displays zu löschen. Die Laufzeit wartet insgesamt höchstens sechs Sekunden auf Hintergrundarbeit und meldet verbleibende Arbeit. Native Decoderaufrufe können diese Frist bei einem nicht reagierenden Backend überschreiten.
+
+## FFmpeg: ruckelnde A/V-Wiedergabe
+
+Der FFmpeg-Decoder verwendet Slice-Threading (`thread_type=slice`). Automatisches Frame-Threading kann bei vielen CPU-Kernen Videobilder mehrere hundert Millisekunden hinter bereits decodierten Audiopaketen zurückhalten. Die begrenzte gemeinsame Wiedergabequeue zeigt diese Bilder dann schubweise statt gleichmäßig. Dies betrifft sowohl Karten als auch den BoilerClient, da die Verzögerung vor dem Renderpfad entsteht.
+
+Bei einer lokalen Messung mit einem 3838×2158-H.264/AAC-Video mit 30 FPS lag die Umsortierung zuvor bei bis zu 511 ms. In sechs Sekunden wurden bei unverändertem Audiopuffer ungefähr 19 statt 175 sichtbare Bildwechsel gemessen. Mit Slice-Threading erreichte dieselbe Wiedergabe wieder ungefähr die Quellbildrate. Diese Zahlen stammen aus einem isolierten Backend-Test; Kartenübertragung, Client und Serverlast können die sichtbare Bildrate zusätzlich begrenzen.
+
+Ein nativer Regressionstest erzeugt ein bewegtes H.264-Video mit AAC-Ton und prüft die kontinuierliche Ausgabe mehrerer Bilder pro Sekunde sowie ausbleibende längere Bildpausen. Reine Video- oder Audiotests erkennen diesen Fehler nicht.
 
 ## Live-Puffer und Kompatibilität
 
-Bei `rtmp-server` und durch Twitch erzeugten FFmpeg-Quellen ist der Live-Modus standardmäßig aktiv. Für normale FFmpeg-/URL-/Dateiquellen bleibt er aus. Optional kann in den vorhandenen Quelldaten `"live": true` oder `false` gesetzt werden; die bisherigen positionsabhängigen Befehlsargumente bleiben gleich:
+Die gemeinsame `mediaplayer`-Source verwendet für Twitch und direkte RTSP-/UDP-URLs standardmäßig Live-Modus. Für normale Dateien und HTTP-URLs bleibt Live-Modus aus; in Quelldaten kann `"live": true` oder `false` explizit gesetzt werden:
 
 ```json
 {"url":"rtsp://example/live","buffer":10,"live":true}
 ```
 
-Die gemeinsame Medienqueue hält im Live-Modus höchstens 500 ms Differenz zwischen den gepufferten Zeitstempeln und nie mehr Einträge als `buffer` erlaubt. Bei Überlast werden alte Audio-/Videoereignisse verworfen und der Audio-Rückstau geleert. Der primitive Live-Audiopuffer ist zusätzlich auf 24.000 Samples (500 ms) begrenzt. Das ist eine Grenze für die Boiler-Puffer, keine Garantie für die gesamte Verzögerung von Netzwerk, Decoder, MediaMTX und Client. Ohne Live-Modus blockiert ein voller Puffer den Produzenten; Audio wird dabei nicht absichtlich verworfen. Auch ohne Voicechat-Backend folgt Video seiner Medienzeitachse.
+Die interne FFmpeg-Medienqueue hält im Live-Modus höchstens 500 ms Differenz zwischen den gepufferten Zeitstempeln und nie mehr Einträge als `buffer` erlaubt. Bei Überlast werden alte Audio-/Videoereignisse verworfen und der Audio-Rückstau geleert. Der primitive Live-Audiopuffer ist zusätzlich auf 24.000 Samples (500 ms) begrenzt. Das ist eine Grenze für die Boiler-Puffer, keine Garantie für die gesamte Verzögerung von Netzwerk, Decoder und Client. Ohne Live-Modus blockiert ein voller Puffer den Produzenten; Audio wird dabei nicht absichtlich verworfen. Auch ohne Voicechat-Backend folgt Video seiner Medienzeitachse.
 
 ## Reproduzierbarer Build
 

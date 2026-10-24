@@ -20,10 +20,13 @@ public class BAudioPlayer implements IBoilerAudioPlayer, AutoCloseable {
 
     private SvcAudioPlayer simpleVCAudioPlayer;
     private PlasmoAudioPlayer plasmoAudioPlayer;
+    private final IBoilerDisplay display;
+    private volatile boolean suspended;
     public BAudioPlayer(IBoilerDisplay display) {
         this(display, display.sourceData() != null && display.sourceData().has("live") && display.sourceData().get("live").getAsBoolean());
     }
     public BAudioPlayer(IBoilerDisplay display, boolean live) {
+        this.display = display;
 
         if(Util.isPluginInstalled("voicechat")) {
             simpleVCAudioPlayer = new SvcAudioPlayer(display, live);
@@ -39,11 +42,18 @@ public class BAudioPlayer implements IBoilerAudioPlayer, AutoCloseable {
     public void clear() {
         if (simpleVCAudioPlayer != null) simpleVCAudioPlayer.clear();
     }
+    public void suspended(boolean value) {
+        suspended = value;
+        if (simpleVCAudioPlayer != null) simpleVCAudioPlayer.suspended(value);
+    }
 
     @Override public void close() { stop(); }
 
     @Override
     public void play(byte[] samples) {
+        if (suspended) return;
+        var settings = display.settings();
+        samples = PcmVolume.scale(samples, PcmVolume.volume(settings), PcmVolume.muted(settings));
         if(simpleVCAudioPlayer != null) {
             simpleVCAudioPlayer.queue(samples);
         }
