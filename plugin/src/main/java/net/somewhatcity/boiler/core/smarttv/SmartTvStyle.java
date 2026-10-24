@@ -4,7 +4,7 @@ import java.awt.*;
 import java.awt.geom.*;
 import java.util.List;
 
-/** Vector artwork remains sharp at map resolution and requires no external assets or fonts. */
+/** Minecraft bitmap typography and pixel icons, drawn directly at map resolution. */
 public final class SmartTvStyle {
     public static final String SETTINGS = "@settings";
     public static final Color WHITE = new Color(248, 249, 255), MUTED = new Color(156, 165, 186);
@@ -14,8 +14,8 @@ public final class SmartTvStyle {
 
     public static int category(String source) {
         return switch (source) {
-            case "youtube", "image", "ffmpeg", "ffmpeg-buffered", "vlc", "gstreamer", "converter" -> 1;
-            case "twitch", "rtmp-server", "client", "client-stream" -> 2;
+            case "youtube", "youtube-tv", "image", "mediaplayer" -> 1;
+            case "twitch" -> 2;
             default -> 3;
         };
     }
@@ -23,29 +23,26 @@ public final class SmartTvStyle {
         return switch (source) {
             case SETTINGS -> "Einstellungen";
             case "youtube" -> "YouTube";
+            case "youtube-tv" -> "YouTube TV";
+            case "browser" -> "Browser";
             case "twitch" -> "Twitch";
             case "image" -> "Bilder";
+            case "mediaplayer" -> "Mediaplayer";
+            case "djcontroller" -> "DJ Controller";
             case "sysinfo" -> "Systeminfo";
-            case "rtmp-server" -> "Live-Stream";
-            case "client-stream" -> "Client Live";
-            case "client" -> "Boiler Client";
-            case "ffmpeg-buffered" -> "FFmpeg Puffer";
             case "section-clone" -> "Ausschnitt";
             case "clone" -> "Display Clone";
             case "keyboard" -> "Tastatur";
-            case "vlc" -> "VLC";
-            case "ffmpeg" -> "FFmpeg";
-            case "gstreamer" -> "GStreamer";
+            case "remote" -> "Fernbedienung";
             default -> source;
         };
     }
     public static Color color(String source) {
         return switch (source) {
-            case "youtube" -> new Color(223, 36, 57);
+            case "youtube", "youtube-tv" -> new Color(223, 36, 57);
             case "twitch" -> new Color(130, 77, 224);
             case "image" -> new Color(29, 163, 151);
             case SETTINGS -> new Color(80, 103, 143);
-            case "vlc" -> new Color(226, 128, 42);
             case "keyboard" -> new Color(66, 111, 166);
             default -> CATEGORY_COLORS[category(source)];
         };
@@ -55,28 +52,32 @@ public final class SmartTvStyle {
         return switch (source) {
             case "image" -> "picture";
             case "keyboard" -> "keyboard";
-            case "clone", "section-clone", "client", "client-stream" -> "screen";
-            case "sysinfo", "swing", "converter" -> "tools";
-            case "rtmp-server", "twitch" -> "live";
+            case "remote" -> "keyboard";
+            case "clone", "section-clone", "browser" -> "screen";
+            case "sysinfo", "swing" -> "tools";
+            case "twitch" -> "live";
             default -> "play";
         };
     }
-    public static void font(Graphics2D g, int style, float size) { g.setFont(new Font(Font.SANS_SERIF, style, Math.max(8, Math.round(size)))); }
+    public static void font(Graphics2D g, int style, float size) { MinecraftText.font(g,style,size); }
+    public static int textWidth(Graphics2D g,String text) { return MinecraftText.width(g,text); }
+    public static void drawText(Graphics2D g,String text,int x,int baseline) { MinecraftText.draw(g,text,x,baseline); }
+    public static void pixels(Graphics2D g) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_OFF);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,RenderingHints.VALUE_STROKE_NORMALIZE);
+    }
     public static void text(Graphics2D g, String value, int x, int y, int width) {
         if (width <= 0) return;
-        String result = value;
-        if (g.getFontMetrics().stringWidth(result) > width) {
-            while (!result.isEmpty() && g.getFontMetrics().stringWidth(result + "…") > width) result = result.substring(0, result.length() - 1);
-            result += "…";
-        }
-        g.drawString(result, x, y);
+        drawText(g,MinecraftText.fit(g,value,width),x,y);
     }
     public static void lines(Graphics2D g, String value, int x, int y, int width, int maxLines, int spacing) {
         String line = "";
         int count = 0;
         for (String word : value.split(" ")) {
             String next = line.isEmpty() ? word : line + " " + word;
-            if (!line.isEmpty() && g.getFontMetrics().stringWidth(next) > width) {
+            if (!line.isEmpty() && textWidth(g,next) > width) {
                 text(g, line, x, y + count++ * spacing, width);
                 line = word;
                 if (count >= maxLines) return;
@@ -85,7 +86,23 @@ public final class SmartTvStyle {
         if (count < maxLines) text(g, line, x, y + count * spacing, width);
     }
 
+    private record Icon(String name,int pixels,int color) {}
+    private static final java.util.Map<Icon,java.awt.image.BufferedImage> ICONS = new java.util.concurrent.ConcurrentHashMap<>();
     public static void icon(Graphics2D graphics, String name, int x, int y, int size, Color color) {
+        if (size <= 0) return;
+        int base = size < 12 ? 8 : size < 16 || size >= 24 ? 12 : 16;
+        int scale = Math.max(1,size/base), extent = base*scale;
+        var image = ICONS.computeIfAbsent(new Icon(name,base,color.getRGB()), key -> {
+            var bitmap = new java.awt.image.BufferedImage(base,base,java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = bitmap.createGraphics();
+            try { pixels(g); paintIcon(g,name,0,0,base,color); } finally { g.dispose(); }
+            return bitmap;
+        });
+        Graphics2D g = (Graphics2D)graphics.create();
+        try { pixels(g); g.drawImage(image,x+(size-extent)/2,y+(size-extent)/2,extent,extent,null); }
+        finally { g.dispose(); }
+    }
+    private static void paintIcon(Graphics2D graphics, String name, int x, int y, int size, Color color) {
         Graphics2D g = (Graphics2D) graphics.create();
         try {
             g.translate(x, y); g.scale(size / 24.0, size / 24.0);

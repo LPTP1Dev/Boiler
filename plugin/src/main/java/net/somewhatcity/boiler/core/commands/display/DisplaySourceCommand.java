@@ -47,6 +47,20 @@ public final class DisplaySourceCommand {
     ) {
         CreateCommandArguments annotation = sourceClass.getAnnotation(CreateCommandArguments.class);
         CreateArgument[] arguments = annotation == null ? new CreateArgument[0] : annotation.arguments();
+        if (name.equals("mediaplayer")) {
+            return Commands.literal(name)
+                    .executes(context -> setSource(context,name,arguments))
+                    .then(Commands.argument("url",com.mojang.brigadier.arguments.StringArgumentType.greedyString())
+                            .executes(context -> {
+                                IBoilerDisplay display=CommandContextUtil.display(context,plugin);
+                                if(display!=null) {
+                                    JsonObject data=new JsonObject();
+                                    data.addProperty("url",com.mojang.brigadier.arguments.StringArgumentType.getString(context,"url"));
+                                    display.source(name,data);
+                                }
+                                return SINGLE_SUCCESS;
+                            }));
+        }
         return appendArguments(Commands.literal(name), arguments, 0, name);
     }
 

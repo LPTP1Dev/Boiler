@@ -116,6 +116,21 @@ class SourceSessionTest {
         verify(env.display, atLeastOnce()).viewport(new Rectangle(0, 0, 128, 128));
     }
 
+    @Test void cloneOverlayTemporarilyDetachesAndReattachesWithoutUnloading() throws Exception {
+        IBoilerDisplay target = mock(IBoilerDisplay.class,RETURNS_DEEP_STUBS);
+        when(target.id()).thenReturn(2); when(target.width()).thenReturn(128); when(target.height()).thenReturn(128);
+        when(env.plugin.displayManager().display(2)).thenReturn(target);
+        JsonObject data = new JsonObject(); data.addProperty("id",2);
+        session.source("clone",data); env.await(() -> session.source() instanceof CloneSource);
+        IBoilerSource clone = session.source();
+        session.overlay(true); verify(env.display.mapDisplay()).cutOffCloneGroupIds();
+        verify(env.display,atLeastOnce()).renderPaused(false); assertSame(clone,session.source());
+        session.overlay(false);
+        verify(env.display.mapDisplay(),times(2)).cloneGroupIds(target.mapDisplay());
+        verify(env.display,atLeast(2)).renderPaused(true); assertSame(clone,session.source());
+        session.close(); verify(env.display.mapDisplay(),times(2)).cutOffCloneGroupIds();
+    }
+
     public static class Leaf implements IBoilerSource {
         static final AtomicInteger unloads = new AtomicInteger(), draws = new AtomicInteger();
         IBoilerDisplay display;

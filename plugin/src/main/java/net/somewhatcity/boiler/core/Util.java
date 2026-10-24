@@ -15,18 +15,8 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
-import org.freedesktop.gstreamer.Caps;
-import org.freedesktop.gstreamer.FlowReturn;
 import org.freedesktop.gstreamer.Gst;
-import org.freedesktop.gstreamer.GstException;
-import org.freedesktop.gstreamer.elements.AppSink;
-import org.freedesktop.gstreamer.elements.PlayBin;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 public class Util {
 
@@ -61,14 +51,11 @@ public class Util {
     private static volatile boolean gstreamerInstalled;
 
     private static boolean gstreamerAttempted;
-    public static void initGstreamer() {
-        BoilerPlugin.getPlugin().runtime().startWorker("gstreamer-init", Util::ensureGstreamer);
-    }
     public static synchronized boolean ensureGstreamer() {
         if (gstreamerAttempted) return gstreamerInstalled;
         gstreamerAttempted = true;
         try {
-            if (Platform.isWindows()) GstreamerUtils.configurePaths();
+            if (Platform.isWindows() || Platform.isMac()) GstreamerUtils.configurePaths();
             Gst.init("Boiler");
             gstreamerInstalled = true;
         } catch (LinkageError | RuntimeException e) {
@@ -83,7 +70,5 @@ public class Util {
         gstreamerInstalled = false;
     }
 
-    public static boolean isGstreamerInstalled() {
-        return gstreamerInstalled;
-    }
+
 }

@@ -30,6 +30,8 @@ final class SourceTestEnvironment implements AutoCloseable {
     final IBoilerDisplay display = mock(IBoilerDisplay.class, RETURNS_DEEP_STUBS);
     final BoilerSourceManager registry = new BoilerSourceManager(plugin);
     final SmartTvInputs inputs;
+    final java.util.Map<UUID,com.google.gson.JsonObject> dialogs = new java.util.HashMap<>();
+    private final java.util.Map<String,UUID> dialogPlayers = new java.util.HashMap<>();
     private final Thread main = Thread.currentThread();
     private final ConcurrentLinkedQueue<Runnable> pending = new ConcurrentLinkedQueue<>();
     private final BoilerPlugin previous;
@@ -49,6 +51,14 @@ final class SourceTestEnvironment implements AutoCloseable {
         BukkitScheduler scheduler = mock(BukkitScheduler.class);
         when(plugin.getServer()).thenReturn(server);
         when(server.getScheduler()).thenReturn(scheduler);
+        when(server.dispatchCommand(any(),anyString())).thenAnswer(invocation -> {
+            String command = invocation.getArgument(1);
+            if (command.startsWith("minecraft:dialog show ")) {
+                String[] parts = command.split(" ",4);
+                dialogs.put(dialogPlayer(parts[2]),com.google.gson.JsonParser.parseString(parts[3]).getAsJsonObject());
+            } else if (command.startsWith("minecraft:dialog clear ")) dialogs.remove(dialogPlayer(command.split(" ")[2]));
+            return true;
+        });
         when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), anyLong(), anyLong())).thenReturn(mock(org.bukkit.scheduler.BukkitTask.class));
         doAnswer(invocation -> {
             Runnable action = invocation.getArgument(0);
@@ -77,12 +87,30 @@ final class SourceTestEnvironment implements AutoCloseable {
     Player player() {
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        String name = "P" + player.getUniqueId().toString().replace("-", "").substring(0,15);
+        when(player.getName()).thenReturn(name);
+        dialogPlayers.put(name,player.getUniqueId());
         when(player.isOnline()).thenReturn(true);
         when(player.hasPermission(anyString())).thenReturn(true);
         return player;
     }
 
     void register(String name, Class<? extends IBoilerSource> source) { registry.register(name, source); }
+
+    private UUID dialogPlayer(String target) {
+        Assertions.assertTrue(target.startsWith("@a[name="));
+        Assertions.assertTrue(target.endsWith(",limit=1]"));
+        String name = com.google.gson.JsonParser.parseString(target.substring(8,target.length()-9)).getAsString();
+        return java.util.Objects.requireNonNull(dialogPlayers.get(name));
+    }
+
+    boolean submitDialog(Player player, String input) {
+        var dialog = dialogs.get(player.getUniqueId());
+        if (dialog == null) return false;
+        String token = dialog.getAsJsonObject("yes").getAsJsonObject("action").get("template").getAsString().split(" ")[2];
+        inputs.respond(player,token,input,false);
+        return true;
+    }
 
     void drain() {
         Runnable action;

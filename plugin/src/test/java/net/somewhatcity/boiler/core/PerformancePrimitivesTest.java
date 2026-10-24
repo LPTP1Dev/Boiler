@@ -7,7 +7,7 @@ import net.somewhatcity.boiler.core.runtime.AtomicFiles;
 import net.somewhatcity.boiler.core.runtime.BoilerRuntime;
 import net.somewhatcity.boiler.core.runtime.LatestTaskQueue;
 import net.somewhatcity.boiler.core.sources.BgrxFrames;
-import net.somewhatcity.boiler.core.sources.MediaQueue;
+import net.somewhatcity.boiler.core.media.playback.MediaQueue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,6 +21,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PerformancePrimitivesTest {
+    @Test void resetsInvalidateBlockedMediaAndPcmWriters() throws Exception {
+        MediaQueue<String> queue = new MediaQueue<>(1,false);
+        queue.put("old image",0);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            long generation = queue.generation();
+            Future<?> producer = executor.submit(() -> { try { queue.put("old audio",20_000,generation); } catch (InterruptedException e) { throw new AssertionError(e); } });
+            queue.reset(); producer.get(2,TimeUnit.SECONDS);
+            assertEquals(0,queue.size());
+            queue.put("after seek",10_000_000);
+            var entry = queue.take(); assertEquals("after seek",entry.value()); assertTrue(entry.discontinuity());
+            PcmBuffer pcm = new PcmBuffer(1,false);
+            CountDownLatch entered = new CountDownLatch(1);
+            Future<?> writer = executor.submit(() -> { entered.countDown(); try { pcm.write(new short[]{1,2,3}); } catch (InterruptedException e) { throw new AssertionError(e); } });
+            assertTrue(entered.await(2,TimeUnit.SECONDS)); await(() -> pcm.size() == 1);
+            pcm.clear(); writer.get(2,TimeUnit.SECONDS); assertEquals(0,pcm.size());
+            pcm.write(new short[]{9}); short[] block = new short[1]; pcm.read(block); assertArrayEquals(new short[]{9},block);
+        }
+    }
     @Test void pcmWrapsAndPadsWithSilence() throws Exception {
         PcmBuffer buffer = new PcmBuffer(4, false);
         buffer.write(new short[]{1, 2, 3});

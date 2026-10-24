@@ -1,4 +1,19 @@
 boiler:
+  mediaplayer:
+    # ffmpeg (bundled), gstreamer or vlc (installed natively). No automatic fallback.
+    # Changes apply to the next playback after a config reload.
+    backend: ffmpeg
+  # Optional BoilerClient 26.3 companion mod.
+  stream:
+    enabled: false
+    bind: "127.0.0.1"
+    port: 25576
+    # {server} uses the Minecraft connection's host. For Internet use, put this
+    # listener behind a TLS reverse proxy and set wss://your-host/boiler/v1.
+    public_url: "ws://{server}:25576/boiler/v1"
+    codec: "auto" # auto, rgb (lossless), h264 (video)
+    fps: 30
+    resolution_scale: 1 # 1..4, capped at 2048 pixels per axis
   settings:
     gui_enabled: false
 
@@ -7,15 +22,6 @@ boiler:
 
     # the simplevoicechat channel name for the displays
     svc_channel_name: "boiler"
-
-  # Settings for client mod support for bigger screens with better performance
-  client:
-    # if this function should be enabled
-    #
-    # WARNING:
-    # To use this function, you will need additional open ports for publishing the rtsp streams.
-    # The plugin will unpack and run MediaMTX (a stream server).
-    enabled: false
 
 # DO NOT CHANGE
 boiler.nextId: 0

@@ -19,11 +19,14 @@ public class BoilerConfig {
     public static String svcChannelName = "boiler";
     public static boolean useSvcGroups = false;
 
-    public static String rtmpHost = "0.0.0.0";
-    public static String rtmpBind = "0.0.0.0";
-    public static int rtmpPort = 1935;
-    public static String ffmpegLogLevel = "error";
-    public static boolean clientEnabled = false;
+    public static String mediaPlayerBackend = "ffmpeg";
+    public static boolean streamEnabled = false;
+    public static String streamBind = "127.0.0.1";
+    public static int streamPort = 25576;
+    public static String streamPublicUrl = "ws://{server}:25576/boiler/v1";
+    public static String streamCodec = "auto";
+    public static int streamFps = 30;
+    public static int streamResolutionScale = 1;
 
     public BoilerConfig(BoilerPlugin plugin) {
         this.plugin = plugin;
@@ -32,7 +35,6 @@ public class BoilerConfig {
     }
 
     public void reloadConfig() {
-        plugin.saveConfig();
         plugin.reloadConfig();
         FileConfiguration config = plugin.getConfig();
 
@@ -40,12 +42,18 @@ public class BoilerConfig {
         guiEnabled = config.getBoolean("boiler.settings.gui_enabled", false);
         svcChannelName = config.getString("boiler.settings.svc_channel_name", "boiler");
         //useSvcGroups = config.getBoolean("boiler.settings.use_svc_groups", false);
-        rtmpHost = config.getString("boiler.client.rtmp_host", "0.0.0.0");
-        rtmpBind = config.getString("boiler.client.rtmp_bind", "0.0.0.0");
-        rtmpPort = config.getInt("boiler.client.rtmp_port", 8554);
 
-        ffmpegLogLevel = config.getString("boiler.settings.ffmpeg_log_level", "error");
-        clientEnabled = config.getBoolean("boiler.settings.client.enabled", false);
+        mediaPlayerBackend = config.getString("boiler.mediaplayer.backend", "ffmpeg");
+        try { mediaPlayerBackend = net.somewhatcity.boiler.core.media.playback.PlaybackBackends.normalize(mediaPlayerBackend); }
+        catch (IllegalArgumentException error) { plugin.getLogger().warning(error.getMessage()); }
+        streamEnabled = config.getBoolean("boiler.stream.enabled", false);
+        streamBind = config.getString("boiler.stream.bind", "127.0.0.1");
+        streamPort = config.getInt("boiler.stream.port", 25576);
+        streamPublicUrl = config.getString("boiler.stream.public_url", "ws://{server}:25576/boiler/v1");
+        streamCodec = config.getString("boiler.stream.codec", "auto");
+        if (!java.util.Set.of("auto", "rgb", "h264").contains(streamCodec)) streamCodec = "auto";
+        streamFps = Math.max(1, Math.min(60, config.getInt("boiler.stream.fps", 30)));
+        streamResolutionScale = Math.max(1, Math.min(4, config.getInt("boiler.stream.resolution_scale", 1)));
 
     }
 }

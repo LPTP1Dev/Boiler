@@ -1,88 +1,111 @@
-# Fernbedienung und SmartTV
+# Sichtbare Fernbedienung und SmartTV
 
 ## Einrichtung
 
 ```text
-/boiler display source 1 smarttv
-/boiler remote 1
+/boiler display source <tvDisplayId> smarttv
+/boiler display source <remoteDisplayId> remote <tvDisplayId>
 ```
 
-Die Fernbedienung ist ein `CARROT_ON_A_STICK` mit einer persistent gespeicherten Display-ID. Ein umbenanntes normales Item wird nicht als Fernbedienung erkannt. Das Item kann weitergegeben werden; der Benutzer benötigt weiterhin die Berechtigungen des Displaysystems.
+TV und Fernbedienung sind zwei verschiedene Displays. Die Fernbedienung speichert ihre Ziel-ID als `link` in den Quelldaten. Auch mehrere Fernbedienungen können denselben TV bedienen. Fehlende oder noch ladende Ziele werden als „nicht bereit“ angezeigt und automatisch erneut aufgelöst. Selbstverknüpfungen werden abgewiesen. Eine Fernbedienung ersetzt niemals die Quelle ihres Ziels.
+
+Ab 128×384 Pixeln (1×3 Karten) enthält das Hochformat alle Tasten. Breite Displays ab 384×128 Pixeln ordnen die Gruppen nebeneinander an. Kleinere Displays bieten die Seiten **TV**, **Medien**, **123** und **Text**. Darstellung und Klickflächen verwenden dieselbe skalierte Geometrie. Ein Klick hebt die Taste kurz hervor. Nicht unterstützte Aktionen sind ausgegraut; ein Klick erklärt die Einschränkung. Fähigkeiten werden regelmäßig und vor jedem Klick aktualisiert.
 
 | Berechtigung | Zweck |
 | --- | --- |
-| `boiler.command.remote` | Fernbedienung per Befehl erhalten |
-| `boiler.command.action` | Fernbedienung und SmartTV bedienen |
-| `boiler.command.source` | Quellen aktivieren und Parameter einrichten |
+| `boiler.command.action` | Fernbedienung, normale App-Eingaben und Lautstärke bedienen |
+| `boiler.command.source` | Quellen einrichten, wechseln und nach Stopp erneut starten |
 | `boiler.command.settings` | Einstellungs-App öffnen und Displayoptionen ändern |
 
-Wie bei den vorhandenen Boiler-Befehlen erhalten Operatoren standardmäßig Zugriff. Andere Spieler benötigen die entsprechenden Permission-Zuweisungen.
+Der frühere Befehl `/boiler remote` und seine Item-/Bewegungslistener sind entfernt. Bereits ausgegebene Items bleiben normale Gegenstände und sperren keine Spielersteuerung mehr. Die Tastatur-Quelle bleibt unverändert verfügbar; Fernbedienung und SmartTV benötigen keine Client-Mod. Der optionale BoilerClient wird über `boiler.stream` konfiguriert.
 
-## Bedienung
+## Bedienung und getrennte Eingaben
 
-Fernbedienung in die **Haupthand** nehmen. Laufen und Springen verändern die Spielerposition nicht; Blickbewegungen bleiben möglich. WASD wird auf die bestehenden `W/A/S/D`-Eingaben abgebildet, Springen auf `SPACE` und Sneaken auf `SHIFT`. Richtungen wiederholen sich nach acht Serverticks alle zwei Ticks; Bestätigen und Zurück werden einmal je Tastendruck ausgelöst.
+| Taste | SmartTV-Oberfläche | Aktive App |
+| --- | --- | --- |
+| Pfeile | Navigation | `ARROW_UP/LEFT/RIGHT/DOWN` |
+| OK | Auswahl bestätigen | `ENTER` |
+| Home | Vollständige Startseite öffnen | App beenden, Startseite öffnen |
+| Zurück | Eingabe/Unteransicht schließen | `ESCAPE` |
+| Einstellungen | Einstellungen öffnen/schließen | Einstellungen als Overlay öffnen/schließen; App läuft weiter |
+| 0–9 | Normale Tasteneingabe | Normale Tasteneingabe |
+| Esc, Tab, Back, Entf, Pg↑/Pg↓ | Normale Tasteneingabe | `ESCAPE`, `TAB`, `BACKSPACE`, `DELETE`, `PAGE_UP/DOWN` |
+| Text | Nicht verfügbar | Privater Eingabedialog für die aktuelle App |
 
-Im TV navigiert WASD zwischen den Kacheln. Springen öffnet die markierte Quelle, Sneaken beendet die Wiedergabe und öffnet das Quellenmenü. Die Seitenpfeile wechseln zwischen weiteren Apps. Normale Display-Klicks öffnen Kacheln ebenfalls. Mit der Fernbedienung werden Klicks auf das gebundene Display einmal weitergeleitet; Klicks auf andere Displays lösen keine parallele Steuerung aus.
+Home ist eine eigene `RemoteAction.HOME` und wird **niemals** als Tastendruck an die App gesendet. Auch während des Ladens, nach Fehlern, beim Pausieren und nach Stopp bleibt Home erreichbar. Normale `SHIFT`-, `ESCAPE`- und Tastatur-`HOME`-Ereignisse werden während der App unverändert weitergereicht. Bei einem Ziel ohne SmartTV ist Home nicht verfügbar. Andere Spieler können eine laufende private Eingabe weder übernehmen noch mit Home abbrechen.
 
-Ab **384×256 Pixeln (3×2 Karten)** beziehungsweise **256×384 Pixeln (2×3 Karten)** erscheint die von webOS inspirierte Startseite: dunkler Hintergrund, großes Banner, farbige Kategorien, App-Leiste und zuletzt verwendete Quellen. Kleinere Displays behalten die kompakte Kachelansicht. Alle Grafiken und Icons werden lokal gezeichnet; es werden keine Bilder oder Webdienste nachgeladen. Unveränderte Menüs verwenden einen zwischengespeicherten Frame.
+**Stopp** beendet die untergeordnete Sitzung und zeigt „Gestoppt“. **Wiedergabe** startet die zuletzt gewählte Quelle mit ihren Parametern neu. Die bisherige Wiedergabeposition wird dabei nicht wiederhergestellt. Home zeigt dagegen die Startseite und behält Parameter und Verlauf.
 
-Auf der großen Startseite wechseln A/D zwischen Apps. W führt zu den Kategorien, ein weiteres W zur Seitenleiste. In der Seitenleiste wählt W/S zwischen Home, Apps und Einstellungen; D führt zurück zu den Apps. S führt von der App-Leiste zu den zuletzt verwendeten Quellen. Springen bestätigt jeweils die Auswahl. Alle sichtbaren Kategorien, App-Kacheln, Seitenpfeile, Quellenkarten und Seitenleisten-Symbole sind auch anklickbar.
+**Text** zeigt einen privaten Minecraft-Dialog mit Textfeld, **Uebernehmen** und **Abbrechen**. Escape fuehrt ebenfalls die Abbrechen-Aktion aus. Die Antwort wird nur an die aktuelle App und nur vom ausloesenden Spieler angenommen. Eigenes Home, App-Wechsel, Sitzungsende oder 120 Sekunden ohne Eingabe schliessen den Dialog und geben die TV-Eingabe frei. Der normale Chat wird nicht abgefangen. `/boiler display action <id> input <text>` bleibt ebenfalls verwendbar.
 
-## Einstellungs-App
+Die Browser-Kachel startet die registrierte Quelle `browser` direkt mit `https://www.google.com/`. Die URL wird auch bei gespeicherten alten Werten und beim erneuten Einrichten nicht abgefragt. Die Browser-Quelle muss wie bisher im Server registriert sein.
 
-Die App **Einstellungen** ist in der App-Liste und auf großen Displays über das Zahnrad in der Seitenleiste erreichbar. Sie benötigt `boiler.command.settings` sowie die normale Bedienberechtigung; `boiler.command.source` ist dafür nicht erforderlich.
+Die Dialoge nutzen das native Minecraft-1.21.6-Format ueber `minecraft:dialog show/clear`. Eine neuere Paper-API ist daher nicht erforderlich. Dialog-Buttons senden ihre Antworten ueber einen spielergebundenen, zufaelligen Einmalschluessel; alte Antworten koennen keinen spaeteren Dialog oder eine andere App bedienen. Die Konsole oeffnet den Dialog; Spieler benoetigen dafuer keine Operatorrechte. Die eigentliche Bedienung prueft weiterhin die vorhandenen Boiler-Berechtigungen.
+
+MapEngine-Klicks können auf Netty-Threads eintreffen. Boiler übernimmt Klicks, Scrollen, Text, Tasten und TV-Aktionen vor der Quellenverarbeitung auf den Serverthread. Dadurch werden auch Dialoge dort geöffnet und geschlossen. Wartende Eingaben an bereits ersetzte Quellen oder entfernte Displays werden verworfen.
+
+Die Dialogbefehle wählen den Spieler ausdrücklich mit `@a[name="Spielername",limit=1]` aus. Eine nackte UUID wird von neueren Versionen bei Spielerargumenten als mögliches Entity-Ziel abgewiesen. Fehlgeschlagenes Öffnen gibt die Eingabe frei; auch ein Fehler beim Schließen verhindert die Freigabe nicht und verdeckt keinen vorherigen Fehler.
+
+## Medien und Ton
+
+FFmpeg-basierte Quellen, VLC und GStreamer melden ihre Fähigkeiten an SmartTV. Pause/Fortsetzen erhält die Position. Die Spultasten springen zehn Sekunden; Suchfähigkeit wird erst nach einer positiven Backend-Prüfung freigegeben. Bei als `live` markierten Streams sind Pause und Spulen deaktiviert. Im Zweifel bleibt Spulen gesperrt. Quellenwechsel und Ladezustände aktualisieren die verfügbaren Aktionen.
+
+FFmpeg führt Steueraufträge auf seinem Decoderthread aus. Ein Sprung verwirft alte Bild-/Audioereignisse und beginnt eine neue Zeitbasis; auch bereits blockierte Schreibaufträge können keine alten Daten nachliefern. Pausierte Warteschlangen bleiben begrenzt. VLC-/GStreamer-Abfragen, Transportaufträge und die native Freigabe werden serialisiert außerhalb des Serverthreads ausgeführt.
+
+Lautstärke wird vor der Sprachchat-Kodierung zentral auf serverseitiges PCM16-Audio angewandt. Schritte: 5 Prozentpunkte, Grenzen: 0–100 %. Stumm ist unabhängig von der Lautstärke gespeichert. Beide Werte liegen im bestehenden `settings`-Objekt (`volume`, `muted`), gelten auch nach Neustart und erscheinen unter **Ton**. Die ursprünglichen PCM-Daten werden nicht verändert. Normale Lautstärketasten benötigen keine Einstellungsberechtigung.
+
+Die verfügbaren Medienaktionen richten sich nach der aktiven Quelle; Erweiterungen müssen zusätzliche TV-Aktionen ausdrücklich anbieten.
+
+## Startseite und Einstellungen
+
+Ab **384×256 Pixeln (3×2 Karten)** beziehungsweise **256×384 Pixeln (2×3 Karten)** erscheint die webOS-inspirierte Startseite mit dunklem Hintergrund, Banner, farbigen Kategorien, App-Leiste, Seitenleiste und zuletzt verwendeten Quellen. Kleinere Displays verwenden kompakte Kacheln. Grafik und Icons werden lokal gezeichnet und unveränderte Frames zwischengespeichert.
+
+SmartTV, Einstellungen und Fernbedienung verwenden die originale Minecraft-Bitmap-Schrift aus der Server-API (`MinecraftFont.Font`). Die Glyphen werden ohne Betriebssystemschrift direkt als Pixelblöcke gezeichnet, ausschließlich in ganzzahligen Stufen (1×, 2×, 3× usw.). Breitenmessung, Zeilenumbruch und Kürzung verwenden dieselben Glyphen. Umlaute und ß stammen ebenfalls aus der Minecraft-Schrift; fehlende Zeichen erhalten ein Minecraft-Ersatzzeichen. Symbole werden auf einem Pixelraster gerendert und mit Nearest-Neighbor ganzzahlig vergrößert. Es gibt keine Kantenglättung oder nachträgliche Skalierung des UI-Frames. Auf kleineren TVs enthält die App-Leiste weniger Einträge pro Seite, damit Namen lesbar bleiben. Kleine Einstellungsansichten ordnen Beschriftung und Wert untereinander an.
+
+Links/rechts wechselt zwischen Apps; hoch führt zu Kategorien und Seitenleiste, runter zu zuletzt verwendeten Quellen. OK bestätigt. Kategorien, Apps, Seitenpfeile, Quellenkarten und Seitenleiste sind auch direkt anklickbar. WASD und Space/Enter der bestehenden Tastatur-Quelle bleiben zur Navigation nutzbar.
+
+Die Einstellungs-App benötigt `boiler.command.settings` und die Bedienberechtigung, aber keine Quellenberechtigung.
+
+Während einer App werden die Einstellungen als Overlay über deren laufendem Bild gezeichnet. Die Quelleninstanz, Wiedergabeposition und Audioausgabe bleiben erhalten. Pfeile, OK, Klicks und Scrollen steuern das Overlay; normale App-Texteingaben und Cursorbewegungen werden dabei nicht an die App weitergereicht. Zurück, Escape oder ein erneuter Druck auf Einstellungen schließen das Overlay und geben die Eingabe an die unverändert laufende Quelle zurück. Home beendet weiterhin die App. Eine eigene offene Eingabe wird beim Umschalten abgebrochen; die private Eingabe eines anderen Spielers bleibt geschützt.
+
+Bei Clone wird die gemeinsame Map-ID-Verbindung vorübergehend gelöst, das Ziel weiter als Hintergrund gezeichnet und die Verbindung beim Schließen wiederhergestellt. Die Clone-Quelle wird dabei nicht entladen. Beim BoilerClient wird der serverseitig gerenderte Bildinhalt einschließlich der Einstellungsansicht übertragen.
 
 | Bereich | Optionen |
 | --- | --- |
-| Bild | Farbdithering, leuchtende Rahmen, Kartendrehung, Blickrichtung, horizontaler und vertikaler Drehwinkel |
+| Bild | Farbdithering, leuchtende Rahmen, Kartendrehung, Blickrichtung, horizontaler/vertikaler Drehwinkel |
 | Leistung | Bildpuffer, Paketbündelung, Renderintervall, Sichtweite |
-| Ton | Tonreichweite |
+| Ton | Tonreichweite, Lautstärke, Stumm |
 
-W/S wechselt durch die Optionen und die Bereiche. A/D ändert den ausgewählten Wert. Springen schaltet einen Schalter um beziehungsweise öffnet bei Zahlen eine private Chat-Abfrage für einen exakten Wert. Die Blickrichtung lässt sich mit A/D oder Springen durchschalten. Ein Klick auf einen Schalter schaltet ihn um; die Pfeile neben Zahlen ändern den Wert. Ein Klick auf den Zahlenwert öffnet die Chat-Eingabe. Ein Rechtsklick auf eine Option stellt den Standard wieder her.
+Hoch/runter wählt Optionen, links/rechts ändert Werte. OK schaltet Schalter um oder öffnet bei Zahlen eine private Eingabe. Klicks auf Werte/Pfeile funktionieren ebenfalls; Rechtsklick setzt den Standard zurück. Zurück schließt zuerst eine eigene Eingabe, dann die Einstellungen. Änderungen werden sofort gespeichert; Tonreichweite gilt beim nächsten Start einer Audioquelle.
 
-Die Änderungen werden sofort über die vorhandenen Displayeinstellungen gespeichert. Bei Änderungen an der Darstellung werden die Rahmen neu angezeigt. Die Tonreichweite gilt beim nächsten Start einer Audioquelle. Die Quellenkonfiguration bleibt erhalten. Renderintervall und Reichweiten müssen positiv sein, die Kartendrehung liegt zwischen 0 und 7, Drehwinkel müssen endlich sein. Sneaken schließt die Einstellungs-App; bei einer offenen Eingabe bricht das erste Sneaken zunächst die Eingabe ab.
+## Quellen, Parameter und Lebenszyklus
 
-Slotwechsel beendet die Fernsteuerung. Ablegen, Handwechsel, Tod oder Teleport beenden sie ebenfalls; anschließend das Item erneut auswählen, um wieder zu steuern. Ein serverseitig geöffnetes Inventar pausiert die Steuerung bis zum Schließen. Das rein clientseitige Öffnen des eigenen Inventars über E hat kein Bukkit-Öffnungsereignis; die erste Inventarinteraktion beendet die Sitzung. Logout, fehlende Berechtigungen, ein entferntes Display und die Plugin-Abschaltung räumen die Sitzung auf. Bewegungsgeschwindigkeiten und Flugberechtigungen werden nicht geändert.
+Im SmartTV werden ausschließlich die registrierten Quellen `yt-tv`, `browser` und `mediaplayer` alphabetisch angeboten, zusätzlich zur Einstellungs-App. Diese Beschränkung gilt auch für Kategorien und zuletzt verwendete Quellen. Andere Quellen bleiben über die normalen Befehle nutzbar; gespeicherte Parameter bleiben erhalten. Fehlende Parameter werden aus `@CreateCommandArguments` übernommen und einzeln in privaten Minecraft-Dialogen erfragt. Ganze Zahlen, endliche Dezimalzahlen sowie `true`/`false` werden validiert; ungültige Eingaben werden erneut abgefragt. `abbrechen`, Zurück, eigenes Home oder 120 Sekunden ohne Eingabe beenden die Abfrage.
 
-Die Fernbedienung nutzt Paper 1.21.6 und benötigt keine zusätzliche Client-Mod. Die Bewegungsposition wird serverseitig gesperrt; die normale clientseitige Bewegungsvorhersage kann kurze visuelle Korrekturen verursachen. Client-Streaming-Quellen benötigen weiterhin ihre vorhandene Client-Mod und MediaMTX-Konfiguration.
+Vollständige gespeicherte Parameter werden beim nächsten Start wiederverwendet. **Rechtsklick auf eine App-Kachel** fragt die Parameter neu ab; ein Punkt übernimmt den bisherigen Feldwert. Ein Spieler kann gleichzeitig nur eine Abfrage besitzen, und währenddessen besitzt er die gemeinsame TV-Eingabe exklusiv.
 
-## Quellen und Parameter
+SmartTV bleibt die äußere Displayquelle. Seine Daten enthalten `selected`, `sources` und `recent` (bis zu sechs Quellen). Displayoptionen bleiben im bisherigen `settings`-Objekt. Nach Serverstart erscheint zunächst das Menü. Ein Display-Adapter hält interne Quellenwechsel, Fehlerquellen und `saveSourceData` innerhalb der untergeordneten Sitzung. Veraltete Ladeergebnisse/Callbacks dürfen nach Home oder App-Wechsel nichts zurückholen. Beim Beenden werden Clone-Verbindungen, Renderpause, Viewport und Client-Darstellungsmodus zurückgesetzt.
 
-Das Menü übernimmt die öffentlich registrierten Quellentypen alphabetisch, einschließlich nachträglich registrierter Erweiterungen. Interne Quellen wie `default` und `error` sowie SmartTV selbst erscheinen nicht als Kacheln. Neue Registrierungen werden bei der nächsten Navigation beziehungsweise beim Öffnen des Menüs übernommen.
+Die öffentliche API ergänzt `RemoteAction` und die optionalen Default-Methoden `remoteActions()` und `onRemoteAction(...)` auf Quelle und Display. Abfragen müssen nicht blockierend sein und nur tatsächlich verfügbare Aktionen melden. `onKey`/`onInput` bleiben unverändert; bestehende Quellen müssen nicht angepasst werden.
 
-Fehlende Parameter werden entsprechend `@CreateCommandArguments` einzeln privat im Chat abgefragt. Nur Nachrichten des einrichtenden Spielers werden abgefangen. Ganze Zahlen, endliche Dezimalzahlen und `true`/`false` werden typgeprüft; ungültige Eingaben können korrigiert werden. `abbrechen` oder Sneaken brechen die Einrichtung ab. Nach 120 Sekunden ohne Eingabe wird die Chat-Erfassung freigegeben. Der vorhandene Befehl `/boiler display action <id> input <text>` kann ebenfalls die aktuelle Abfrage beantworten.
+## Automatisierte Prüfung
 
-Bereits vollständige Parameter werden bei erneuter Auswahl wiederverwendet. **Rechtsklick auf eine Kachel** fragt alle Parameter erneut ab. Ein einzelner Punkt übernimmt den bisherigen Wert des aktuellen Feldes. Auch nach einem Serverneustart bleiben die Werte erhalten; der TV startet zunächst im Menü.
-
-Menü und Wiedergabe werden gemeinsam pro Display angezeigt. Während einer Einrichtung besitzt der auslösende Spieler die Eingabe; andere Benutzer können diese Abfrage nicht beantworten oder abbrechen. Ein Spieler kann gleichzeitig nur eine Chat-Abfrage besitzen.
-
-## Quellen-Lebenszyklus und Speicherung
-
-SmartTV bleibt die äußere Display-Quelle (`sourceName() == "smarttv"`). Die Daten enthalten `selected`, ein Objekt `sources` mit den zuletzt verwendeten Parametern je Quellenname sowie die optionale Liste `recent` mit bis zu sechs zuletzt verwendeten Quellen. Bestehende Display-Dateien benötigen keine Migration. Displayoptionen bleiben im vorhandenen `settings`-Objekt des Displays gespeichert.
-
-Die untergeordnete Quelle sieht über ihren Display-Adapter ihren eigenen Namen, ihre Daten und ihre aktive Quelleninstanz. Interne Weiterleitungen, etwa YouTube zu GStreamer oder Twitch zu FFmpeg, und interne Fehlerquellen bleiben im TV. Veraltete Callbacks können nach einem Wechsel keine Quellen oder Daten mehr überschreiben. Zeichnung, Audio, Klicks, Scrollen, Text, Tasten und Cursorereignisse werden an die aktive Quelle weitergereicht; `SHIFT` beziehungsweise `ESCAPE` öffnen das Menü.
-
-Zurück beendet die untergeordnete Quelle. Ein erneuter Start öffnet sie mit ihren gespeicherten Parametern neu; die Wiedergabeposition wird nicht gespeichert. Clone-Verbindungen, Renderpause, Viewport und der Client-Darstellungsmodus werden beim Wechsel zurückgesetzt. Beim Öffnen einer Client-Quelle wird der bestehende Streamingpfad aktiviert, beim Zurückkehren wieder die normale MapEngine-Darstellung.
-
-## Verifikation
-
-Die automatisierten Tests prüfen Item-Markierungen und Befehlspfade, Eingabemapping und Wiederholung, Positionssperre mit freier Blickrichtung, Sitzungsenden, private Chat-Abfragen, Typprüfung, Berechtigungen, Speicherung, Menü-Hitboxen, sechs Rendergrößen, Kategorien und Seitenleiste, alle Displayoptionen, Einstellungsgrenzen und Standardwerte sowie deren Übernahme in die bestehende Renderpipeline. Dazu kommen interne Weiterleitungen, verspätete Ladeergebnisse, Fehler, Client-Moduswechsel und die Freigabe einer echten `CloneSource`. Die vorhandenen Lifecycle-, Rendering-, Persistenz- und nativen FFmpeg-Tests bleiben Bestandteil der Testsuite.
-
-Build mit Java 21:
+Zusaetzliche Dialogtests pruefen Spielerbindung, Escape/Abbrechen, Timeout, Einmalantworten, veraltete Antworten, Makro-Escaping und den Brigadier-Befehlspfad. Browser-Starts pruefen den Google-Standard ohne URL-Dialog. Die Tests umfassen Layouts und Klickflächen für 128×128, 128×256, 128×384, 384×128 und größere Displays, Zielauflösung und Wiederverbindung, Fähigkeiten und Berechtigungen, getrennte App-/Home-Eingaben, Home während verspäteten Ladens und nach Fehlern, genau einmaliges Entladen, Stopp/Neustart sowie private App-Texteingabe per Dialog. Native FFmpeg-Tests prüfen Pause/Fortsetzen, Positionswechsel, Live-Einschränkungen, Audioformat und Thread-Freigabe. Weitere Tests prüfen serialisierte native Steueraufträge, PCM-Lautstärke ohne Datenmutation und das Verwerfen alter Puffer nach Sprüngen. Bestehende Lifecycle-, Rendering-, Clone- und Persistenztests laufen weiter.
 
 ```powershell
 $env:JAVA_HOME = 'C:\Pfad\zum\jdk-21'
 .\gradlew.bat --no-daemon --console=plain --gradle-user-home build/gradle-user-home build
 ```
 
-Die JAR liegt unter `build/libs/Boiler-3.0.3-all.jar`, der Testbericht unter `plugin/build/reports/tests/test/index.html`. Menüvorschauen werden beim Test unter `plugin/build/reports/smarttv-preview/` erzeugt.
+JAR: `build/libs/Boiler-3.0.3-all.jar`. Testbericht: `plugin/build/reports/tests/test/index.html`. Render-Vorschauen: `plugin/build/reports/remote-preview/` und `plugin/build/reports/smarttv-preview/`.
 
-Für die Live-Abnahme auf Paper 1.21.6 mit MapEngine und MapMediaExt:
+## Verbleibende Live-Abnahme
 
-1. SmartTV und Fernbedienung für ein Display erzeugen; alle sechs Eingaben sowie Slotwechsel und freie Blickrichtung prüfen.
-2. Bild, YouTube/Twitch, Clone und eine konfigurierte Client-Streaming-Quelle jeweils starten und mit Sneaken zurückkehren. Bild, Ton, Prozesse und Clone-Verbindungen müssen dabei sauber enden.
-3. Mit zwei Spielern unterschiedliche Chat-Abfragen sowie eine belegte Abfrage am gleichen TV prüfen; Parameter dürfen nicht im öffentlichen Chat erscheinen.
-4. Während Einrichtung und Wiedergabe Item ablegen, Hand wechseln, Inventar öffnen, teleportieren, sterben und ausloggen. Außerdem Display entfernen und den Server vollständig neu starten.
-5. Auf Displays mit 3×2 und 2×3 Karten alle Kategorien, App-Seiten, zuletzt verwendeten Quellen und Einstellungsbereiche mit Fernbedienung und Maus bedienen. Dithering, Pufferung, Renderintervall, Ausrichtung und Reichweiten ändern und nach dem Neustart erneut prüfen.
+Im Workspace steht kein laufender Paper-Server mit Spielern, Sprachchat und Streaming-Clients zur Verfügung. VLC/GStreamer werden über die gemeinsame Steuerauftragsverwaltung automatisiert geprüft; ihre echten installierten nativen Backends benötigen zusätzlich die folgende Live-Prüfung auf Paper 1.21.6 mit MapEngine und MapMediaExt:
 
-Ein laufender Minecraft-Testserver mit Spielern und Streaming-Clients steht im Workspace nicht zur Verfügung. Die Live-Abnahme ist deshalb zusätzlich zur automatisierten Prüfung erforderlich.
+1. TV und Remote als getrennte Displays erstellen. Alle Layoutgrößen, Seiten, Klickmarkierungen und ausgegraute Tasten prüfen. Zwei Fernbedienungen mit demselben TV verbinden. Ziel entfernen/neu laden, unterschiedliche Neustartreihenfolgen und Selbstverknüpfung prüfen.
+2. Bild, Mediaplayer, YouTube/Twitch und Clone mit Karten und BoilerClient öffnen. Home aus Wiedergabe, Pause, Stopp, Lade- und Fehlerzustand betätigen. Späte Ergebnisse dürfen die Startseite nicht ersetzen. Bild-/Audioausgabe, Clone-Verbindung und Client-Modus müssen korrekt enden.
+3. Mit lokalem Video samt Ton Pause/Fortsetzen und beide Spulrichtungen prüfen: Position erhalten, neue Bild-/Tonposition synchron, keine alten Tonreste. Live-Streams dürfen Pause/Spulen nicht anbieten.
+4. Shift, Escape und Tastatur-Home in einer App prüfen. Zurück muss dort Escape senden; ausschließlich der TV-Home-Button beendet die App. Stopp und erneute Wiedergabe mit gespeicherten Parametern prüfen.
+5. Mit zwei Spielern private Quellen- und Textabfragen, fremdes Home, Timeout, Rechteentzug, Logout, App-Wechsel und Display-Entfernung prüfen. Der Dialog muss geschlossen und die TV-Bedienung wieder frei sein. Der normale Chat bleibt jederzeit nutzbar.
+6. Dithering, Leistung, Ausrichtung, Lautstärke und Stumm ändern und nach Neustart vergleichen. Vol± darf unabhängig von Stumm und ohne Einstellungsberechtigung funktionieren. Alte Remote-Items dürfen keinerlei Bewegungssperre mehr auslösen.

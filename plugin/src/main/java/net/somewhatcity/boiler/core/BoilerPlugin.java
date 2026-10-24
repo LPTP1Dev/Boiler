@@ -24,32 +24,18 @@ import net.somewhatcity.boiler.core.display.BoilerSourceManager;
 import net.somewhatcity.boiler.core.display.ImplDisplayManager;
 import net.somewhatcity.boiler.core.display.UpdateIntervalManager;
 import net.somewhatcity.boiler.core.listener.BoilerListener;
-import net.somewhatcity.boiler.core.listener.PlayerJoinListener;
-import net.somewhatcity.boiler.core.network.HandshakeResponseListener;
-import net.somewhatcity.boiler.core.network.StreamStateRequestListener;
 import net.somewhatcity.boiler.core.sources.*;
 import net.somewhatcity.boiler.core.sources.hidden.DefaultSource;
 import net.somewhatcity.boiler.core.sources.hidden.ErrorSource;
-import net.somewhatcity.boiler.core.sources.VideoConverterSource;
-import net.somewhatcity.boiler.core.remote.RemoteManager;
 import net.somewhatcity.boiler.core.smarttv.SmartTvInputs;
 import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegLogCallback;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Locale;
-import java.util.Set;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 import net.somewhatcity.boiler.core.runtime.BoilerRuntime;
 
@@ -64,13 +50,12 @@ public class BoilerPlugin extends JavaPlugin {
     private ISourceManager sourceManager;
     private UpdateIntervalManager intervalManager;
 
-    private MediaMtx mediaMtx;
-    private MediaMtxAuthServer mediaMtxAuthServer;
     private BoilerRuntime runtime;
     private Metrics metrics;
-    private RemoteManager remoteManager;
     private SmartTvInputs smartTvInputs;
     private volatile boolean stopping;
+    private net.somewhatcity.boiler.core.client.ClientStreamServer streamServer;
+    public net.somewhatcity.boiler.core.client.ClientStreamServer streamServer() { return streamServer; }
 
     public BoilerRuntime runtime() { return runtime; }
     public boolean stopping() { return stopping; }
@@ -125,32 +110,6 @@ public class BoilerPlugin extends JavaPlugin {
         metrics = new Metrics(this,18926);
         new BoilerConfig(this);
 
-        if(BoilerConfig.clientEnabled) {
-            mediaMtxAuthServer = new MediaMtxAuthServer();
-            String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
-            if(os.contains("win")) {
-                saveResource("mediamtx.exe", true);
-            }
-            else if(os.contains("nux")) {
-                saveResource("mediamtx", true);
-
-                try {
-                    File mediaMtx = new File(BoilerPlugin.getPlugin().getDataFolder(), "mediamtx");
-                    Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxr-xr-x");
-                    Files.setPosixFilePermissions(mediaMtx.toPath(), permissions);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            saveResource("mediamtx.yml", false);
-            mediaMtx = new MediaMtx();
-            mediaMtx.start();
-        }
-
-
-        Util.initGstreamer();
-
         LOGGER = Bukkit.getLogger();
         MAP_ENGINE = Bukkit.getServicesManager().getRegistration(MapEngineApi.class).getProvider();
 
@@ -169,22 +128,19 @@ public class BoilerPlugin extends JavaPlugin {
         this.sourceManager.register("error", ErrorSource.class, false);
 
         this.sourceManager.register("image", ImageSource.class);
-        this.sourceManager.register("ffmpeg", FFMPEGSource.class);
-        this.sourceManager.register("ffmpeg-buffered", BufferedFFMPEGSource.class);
         this.sourceManager.register("twitch", TwitchSource.class);
         this.sourceManager.register("youtube", YoutubeSource.class);
-        this.sourceManager.register("rtmp-server", RTMPSource.class);
         this.sourceManager.register("clone", CloneSource.class);
         this.sourceManager.register("swing", SwingTest.class);
         this.sourceManager.register("section-clone", SectionCloneSource.class);
         this.sourceManager.register("keyboard", KeyboardSource.class);
-        this.sourceManager.register("vlc", VlcSource.class);
-        this.sourceManager.register("converter", VideoConverterSource.class);
-        this.sourceManager.register("gstreamer", GstreamerSource.class);
         this.sourceManager.register("sysinfo", SystemInfoSource.class);
-        this.sourceManager.register("client", BoilerClientSource.class);
-        this.sourceManager.register("client-stream", BoilerClientStreamSource.class);
         this.sourceManager.register("smarttv", SmartTVSource.class);
+        this.sourceManager.register("remote", RemoteSource.class);
+        this.sourceManager.register("mediaplayer", MediaPlayerSource.class);
+        this.sourceManager.register("djcontroller", DJControllerSource.class);
+        try { new net.somewhatcity.boiler.core.media.MediaLibrary(getDataFolder().toPath()); }
+        catch (java.io.IOException error) { getLogger().log(java.util.logging.Level.WARNING,"Creating media library",error); }
 
 
         this.api = new ImplBoilerApi(this);
@@ -192,42 +148,30 @@ public class BoilerPlugin extends JavaPlugin {
 
         PluginManager pm = Bukkit.getPluginManager();
         pm.registerEvents(new BoilerListener(), this);
-        pm.registerEvents(new PlayerJoinListener(), this);
         smartTvInputs = new SmartTvInputs(this);
-        remoteManager = new RemoteManager(this);
         pm.registerEvents(smartTvInputs, this);
-        pm.registerEvents(remoteManager, this);
 
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, commands ->
                 commands.registrar().register(BoilerCommand.create(this))
         );
 
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "boiler:handshake_request");
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "mymod:test");
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "boiler:display_create");
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "boiler:display_remove");
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "boiler:stream_data");
-        Bukkit.getServer().getMessenger().registerOutgoingPluginChannel(this, "boiler:stream_state_response");
 
-        Bukkit.getServer().getMessenger().registerIncomingPluginChannel(this, "boiler:stream_state_request", new StreamStateRequestListener());
-        Bukkit.getServer().getMessenger().registerIncomingPluginChannel(this, "boiler:handshake_response", new HandshakeResponseListener());
-    }
-
-    public static boolean hasBoilerMod(Player player) {
-        return player.hasMetadata("boiler_mod") && player.getMetadata("boiler_mod").get(0).asBoolean();
+        if (BoilerConfig.streamEnabled) {
+            try { streamServer = new net.somewhatcity.boiler.core.client.ClientStreamServer(this); }
+            catch (Exception e) { getLogger().log(java.util.logging.Level.WARNING, "Client streaming unavailable; using maps", e); }
+        }
     }
 
     @Override
     public void onDisable() {
         stopping = true;
-        if (remoteManager != null) closeSafely("remote controls", remoteManager::close);
         if (smartTvInputs != null) closeSafely("SmartTV inputs", smartTvInputs::close);
         if (displayManager instanceof ImplDisplayManager manager) closeSafely("displays", manager::close);
-        closeSafely("GStreamer", Util::shutdownGstreamer);
-        if (mediaMtx != null) closeSafely("MediaMTX", mediaMtx::stop);
-        if (mediaMtxAuthServer != null) closeSafely("authentication server", mediaMtxAuthServer::stop);
+        if (streamServer != null) closeSafely("client streams", streamServer::close);
         if (metrics != null) closeSafely("metrics", metrics::shutdown);
         if (runtime != null) closeSafely("background runtime", runtime::close);
+        // Display unloads dispose native players on runtime workers before the shared library quits.
+        closeSafely("GStreamer", Util::shutdownGstreamer);
     }
     private void closeSafely(String resource, Runnable close) {
         try { close.run(); }
@@ -239,16 +183,10 @@ public class BoilerPlugin extends JavaPlugin {
     public ISourceManager sourceManager() {
         return sourceManager;
     }
-    public RemoteManager remoteManager() { return remoteManager; }
     public SmartTvInputs smartTvInputs() { return smartTvInputs; }
     public UpdateIntervalManager intervalManager() {
         return intervalManager;
     }
-
-    public MediaMtxAuthServer mediaMtxAuthServer() {
-        return mediaMtxAuthServer;
-    }
-    public MediaMtx mediaMtx() { return mediaMtx; }
 
     public static BoilerPlugin getPlugin() {
         return plugin;

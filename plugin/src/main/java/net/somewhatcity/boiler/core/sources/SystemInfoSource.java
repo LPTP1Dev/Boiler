@@ -43,7 +43,7 @@ public class SystemInfoSource implements IBoilerSource {
                 "MapEngine Version: " + (mapEngine == null ? "unavailable" : mapEngine.getPluginMeta().getVersion()),
                 "SimpleVoiceChat installed: " + Util.isPluginInstalled("voicechat"),
                 "PlasmoVoice installed: " + Util.isPluginInstalled("PlasmoVoice"),
-                "Gstreamer installed: " + Util.isGstreamerInstalled());
+                "Media backend: " + net.somewhatcity.boiler.core.BoilerConfig.mediaPlayerBackend);
     }
     @Override public void draw(Graphics2D graphics, Rectangle viewport) {
         graphics.setColor(Color.BLACK);

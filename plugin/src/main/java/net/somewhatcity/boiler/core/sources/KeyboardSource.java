@@ -180,6 +180,10 @@ public class KeyboardSource implements IBoilerSource {
         if (key.action == KeyEvent.VK_RIGHT) return "ARROW_RIGHT";
         if (key.action == KeyEvent.VK_UP) return "ARROW_UP";
         if (key.action == KeyEvent.VK_DOWN) return "ARROW_DOWN";
+        if (key.action == KeyEvent.VK_HOME) return "HOME";
+        if (key.action == KeyEvent.VK_END) return "END";
+        if (key.action == KeyEvent.VK_PAGE_UP) return "PAGE_UP";
+        if (key.action == KeyEvent.VK_PAGE_DOWN) return "PAGE_DOWN";
 
         String value = key.text;
         if (key.modifiers != null) {

@@ -13,6 +13,8 @@ public final class BoilerRuntime implements AutoCloseable {
     private final ScheduledThreadPoolExecutor audio = scheduler("audio", 2);
     private final ExecutorService io = pool("io");
     private final ExecutorService loaders = pool("load");
+    private final ExecutorService encoders = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(16), factory("encode"), new ThreadPoolExecutor.AbortPolicy());
     private final Set<Thread> workers = ConcurrentHashMap.newKeySet();
     private volatile boolean closed;
     private final OkHttpClient http = new OkHttpClient.Builder()
@@ -46,6 +48,7 @@ public final class BoilerRuntime implements AutoCloseable {
     public ScheduledExecutorService audio() { return audio; }
     public ExecutorService io() { return io; }
     public ExecutorService loaders() { return loaders; }
+    public ExecutorService encoders() { return encoders; }
     public OkHttpClient http() { return http; }
 
     public synchronized Thread startWorker(String name, Runnable action) {
@@ -68,6 +71,7 @@ public final class BoilerRuntime implements AutoCloseable {
         render.shutdownNow();
         audio.shutdownNow();
         loaders.shutdownNow();
+        encoders.shutdown(); // Let owned frame snapshots release native codecs in finally blocks.
         io.shutdownNow();
         workers.forEach(Thread::interrupt);
         http.dispatcher().cancelAll();
@@ -81,13 +85,13 @@ public final class BoilerRuntime implements AutoCloseable {
                 if (remaining <= 0) break;
                 thread.join(Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining)));
             }
-            for (ExecutorService service : new ExecutorService[]{render, audio, loaders, io}) {
+            for (ExecutorService service : new ExecutorService[]{render, audio, loaders, encoders, io}) {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) break;
                 service.awaitTermination(remaining, TimeUnit.NANOSECONDS);
             }
         } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        if (workers.stream().anyMatch(Thread::isAlive) || !loaders.isTerminated() || !io.isTerminated())
+        if (workers.stream().anyMatch(Thread::isAlive) || !loaders.isTerminated() || !encoders.isTerminated() || !io.isTerminated())
             java.util.logging.Logger.getLogger("Boiler").warning("Some background work exceeded the six-second shutdown deadline");
     }
 }

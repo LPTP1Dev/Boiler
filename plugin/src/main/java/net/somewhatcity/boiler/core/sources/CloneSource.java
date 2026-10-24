@@ -29,6 +29,13 @@ public class CloneSource implements IBoilerSource, CancellableLoad {
     private volatile boolean attached;
     private IBoilerDisplay display;
     private IBoilerDisplay toClone;
+    private final net.somewhatcity.boiler.core.display.RasterRenderer overlayRaster = new net.somewhatcity.boiler.core.display.RasterRenderer();
+    private volatile boolean overlay;
+    private final IBoilerSource overlayPainter = new IBoilerSource() {
+        @Override public void load(IBoilerDisplay display,JsonObject data) {}
+        @Override public void unload() {}
+        @Override public void draw(java.awt.Graphics2D graphics,java.awt.Rectangle viewport) { CloneSource.this.draw(graphics,viewport); }
+    };
     @Override
     public void load(IBoilerDisplay display, JsonObject data) {
         this.display = display;
@@ -52,6 +59,7 @@ public class CloneSource implements IBoilerSource, CancellableLoad {
 
     @Override public void unload() {
         stopped = true;
+        overlayRaster.clear();
         if (!attached || display == null) return;
         Runnable detach = () -> {
             if (attached) {
@@ -69,7 +77,23 @@ public class CloneSource implements IBoilerSource, CancellableLoad {
 
     @Override
     public void draw(IDrawingSpace drawingSpace) {
+        if (overlay) drawingSpace.image(overlayRaster.drawImage(overlayPainter,display.width(),display.height()),0,0);
+    }
 
+    public void overlay(boolean enabled) {
+        if (stopped || overlay == enabled || toClone == null) return;
+        overlay = enabled;
+        if (enabled && attached) { display.mapDisplay().cutOffCloneGroupIds(); attached = false; }
+        else if (!enabled && !attached) { display.mapDisplay().cloneGroupIds(toClone.mapDisplay()); attached = true; }
+        Bukkit.getOnlinePlayers().forEach(player -> display.mapDisplay().mapId(player,0));
+        display.respawn();
+    }
+
+    @Override public void draw(java.awt.Graphics2D graphics,java.awt.Rectangle viewport) {
+        if (toClone == null) return;
+        if (toClone instanceof net.somewhatcity.boiler.core.display.ImplBoilerDisplay target)
+            target.drawSection(graphics,0,0,display.width(),display.height());
+        else if (toClone.source() != null) toClone.source().draw(graphics,viewport);
     }
 
 }

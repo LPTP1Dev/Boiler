@@ -86,7 +86,9 @@ public class ImageSource implements IBoilerSource, CancellableLoad {
                     display.saveSourceData(data);
                 }
             }
+            if (image == null) throw new IOException("Unsupported image format");
         } catch (IOException e) {
+            obj.addProperty("message",e.getMessage());
             display.source("error", obj);
         }
     }

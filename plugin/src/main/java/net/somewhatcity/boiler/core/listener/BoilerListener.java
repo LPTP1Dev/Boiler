@@ -15,51 +15,39 @@ import de.pianoman911.mapengine.api.util.MapClickType;
 import de.pianoman911.mapengine.api.util.MapTraceResult;
 import net.somewhatcity.boiler.api.display.IBoilerDisplay;
 import net.somewhatcity.boiler.core.BoilerPlugin;
-import net.somewhatcity.boiler.core.remote.RemoteItem;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.plugin.Plugin;
-
-import java.nio.charset.StandardCharsets;
 
 import static net.somewhatcity.boiler.core.BoilerPlugin.MAP_ENGINE;
 
 public class BoilerListener implements Listener {
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent e) {
-        if (RemoteItem.displayId(e.getPlayer().getInventory().getItem(e.getPreviousSlot())) != null
-                || RemoteItem.displayId(e.getPlayer().getInventory().getItem(e.getNewSlot())) != null) return;
-        int b = e.getPreviousSlot();
-        int n = e.getNewSlot();
+        // Fast scrolling can skip slots, including across the hotbar boundary.
+        // Interpret the nine slots as a ring rather than comparing slot numbers.
+        int delta = e.getNewSlot() - e.getPreviousSlot();
+        if (delta > 4) delta -= 9;
+        else if (delta < -4) delta += 9;
+        if (delta == 0) return;
 
         MapTraceResult result = MAP_ENGINE.traceDisplayInView(e.getPlayer(), 10);
         if(result == null) return;
         IBoilerDisplay display = BoilerPlugin.getPlugin().displayManager().display(result.display());
         if(display == null) return;
 
-        int delta = 0;
-
-        if(b == 8 && n == 0){
-            delta = 1;
-        }else if(b == 0 && n == 8){
-            delta = -1;
-        }else if(b < n){
-            delta = 1;
-        }else if(n < b){
-            delta = -1;
+        // Existing sources consume one +/-1 step per call. Preserve skipped steps
+        // without changing their behavior, and trace the aimed display only once.
+        int direction = Integer.signum(delta);
+        for (int step = 0; step < Math.abs(delta); step++) {
+            display.onScroll(e.getPlayer(), result.viewPos().x(), result.viewPos().y(), direction);
         }
-
-        display.onScroll(e.getPlayer(), result.viewPos().x(), result.viewPos().y(), delta);
 
     }
 
     @EventHandler
     public void onMapClick(MapClickEvent e) {
-        if (RemoteItem.displayId(e.player().getInventory().getItemInMainHand()) != null) return;
         IBoilerDisplay display = BoilerPlugin.getPlugin().displayManager().display(e.display());
         if(display != null) display.onClick(e.player(), e.x(), e.y(), e.clickType().equals(MapClickType.RIGHT_CLICK));
     }
